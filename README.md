@@ -4,17 +4,15 @@ Issues on the left, Claude Code tabs on the right, one Obsidian note per issue.
 
 The name comes from the Slovak word *salaš*, a shepherd's hut up in the mountain pastures.
 
-```
- salash  ▲ 1                            │ ◐ 1:Refactor tile cache   ● 2:Fix loader   $ 3:shell
-  To-do 5  Active 3  Done 1  Archive 0  │
-                                        │  (live Claude Code session for the selected issue)
- ◐ TS-42                             3▤ │
-   Přidat mapu dlaždic pro fotky        │
- ▲ PROJ-118                          1▤ │
-   Fix OAuth login loop                 │
-   LOCAL-3                              │
-   Session naming request               │
-```
+Running Claude Code on several issues at once means a pile of terminals, branches and notes,
+and no idea which Claude is waiting for you. salash sorts all of it by issue. Pick an issue
+from GitHub, Jira or your own list and its Claude sessions, shells, git worktree and Obsidian
+note are right there. Every issue shows whether its Claude is working, finished or needs you,
+and everything keeps running when you close the terminal.
+
+![salash demo: start Claude on an issue, open a shell next to it, approve the Claude that needs you, move the issue to Done](docs/demo.gif)
+
+To record the demo again, run `demo/record.sh` (see [demo/](demo/)).
 
 - **Sorted by issue.** Each issue has its own tabs: Claude sessions, shells, and a note editor.
 - **Scratch, for work outside any issue.** Press `` ` `` and a Scratch row appears at the top
