@@ -40,7 +40,7 @@ Enter
 Wait+Screen@40s /accept edits/
 Show
 Sleep 1s
-Type "Make test_partial_tiles_count pass. Only edit tiles.py, don't run anything."
+Type "Fix tiles.py so test_partial_tiles_count passes, then run python3 test_tiles.py once."
 Sleep 500ms
 Enter
 Sleep 2.5s
@@ -51,17 +51,25 @@ Type "t"
 Sleep 1.5s
 Type "git branch --show-current"
 Enter
-Sleep 2s
 
-# Claude finished (● on the issue and its tab): run the tests next to it, then see its diff.
-Wait+Screen@180s /● TS-47/
-Sleep 1s
-Type "python3 test_tiles.py"
-Enter
+# Claude wants to run the tests and needs you: ▲ on the issue and on its tab.
+Wait+Screen@120s /▲ TS-47/
 Sleep 2.5s
 Ctrl+a
 Type "1"
-Sleep 4s
+Wait+Screen@20s /Do you want to proceed/
+Sleep 2s
+Enter
+
+# Claude finished (●): check its change from the shell, then move on.
+Wait+Screen@120s /● TS-47/
+Sleep 2.5s
+Ctrl+a
+Type "2"
+Sleep 800ms
+Type "git diff --stat"
+Enter
+Sleep 2.5s
 
 # Done: the note moves and the session is logged.
 Ctrl+a

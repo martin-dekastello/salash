@@ -10,7 +10,7 @@ from GitHub, Jira or your own list and its Claude sessions, shells, git worktree
 note are right there. Every issue shows whether its Claude is working, finished or needs you,
 and everything keeps running when you close the terminal.
 
-![salash demo: start Claude on an issue, open a shell next to it, run the tests, move the issue to Done](docs/demo.gif)
+![salash demo: start Claude on an issue, open a shell next to it, approve the Claude that needs you, move the issue to Done](docs/demo.gif)
 
 To record the demo again, run `demo/record.sh` (see [demo/](demo/)).
 

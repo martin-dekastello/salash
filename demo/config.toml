@@ -6,7 +6,7 @@ worktrees_dir = "@DEMO@/worktrees"
 local_repo = "@DEMO@/tiles"
 local_prefix = "TS"
 theme = "dark"
-seen_after_secs = 2
+seen_after_secs = 5
 bell = false
 # Haiku keeps the demo quick; acceptEdits so it doesn't stop to ask about every edit.
 claude_command = ["claude", "--model", "haiku", "--permission-mode", "acceptEdits"]
