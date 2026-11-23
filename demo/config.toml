@@ -1,0 +1,14 @@
+# Config for README recordings. record.sh replaces @DEMO@ with the folder it records in.
+vault = "@DEMO@/vault"
+notes_dir = "Issues"
+worktrees = true
+worktrees_dir = "@DEMO@/worktrees"
+local_repo = "@DEMO@/tiles"
+local_prefix = "TS"
+theme = "dark"
+seen_after_secs = 2
+bell = false
+# Haiku keeps the demo quick; acceptEdits so it doesn't stop to ask about every edit.
+claude_command = ["claude", "--model", "haiku", "--permission-mode", "acceptEdits"]
+# Plain bash with the tape's PS1 ("$ "), so your own prompt (user, host) stays out of the GIF.
+shell_command = ["bash", "--noprofile", "--norc"]
