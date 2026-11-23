@@ -8,7 +8,10 @@ use serde_json::json;
 use std::path::Path;
 
 /// The embedded skills: name and `SKILL.md`.
-const SKILLS: &[(&str, &str)] = &[("new-tab", include_str!("../skills/new-tab/SKILL.md"))];
+const SKILLS: &[(&str, &str)] = &[
+    ("new-tab", include_str!("../skills/new-tab/SKILL.md")),
+    ("claude-grep", include_str!("../skills/claude-grep/SKILL.md")),
+];
 
 /// Replace `root` with the plugin: the manifest and every skill. What was
 /// there before is removed first, so a skill this binary no longer has goes
@@ -61,7 +64,9 @@ mod tests {
         let m: Value = serde_json::from_slice(&std::fs::read(root.join(".claude-plugin/plugin.json")).unwrap()).unwrap();
         assert_eq!(m["name"], "salash");
         assert_eq!(m["version"], env!("CARGO_PKG_VERSION"));
-        assert!(SKILLS.iter().any(|(n, _)| *n == "new-tab"));
+        for want in ["new-tab", "claude-grep"] {
+            assert!(SKILLS.iter().any(|(n, _)| *n == want), "{want} not embedded");
+        }
         for (name, text) in SKILLS {
             let got = std::fs::read_to_string(root.join("skills").join(name).join("SKILL.md")).unwrap();
             assert_eq!(got, *text);
@@ -117,5 +122,25 @@ mod tests {
             assert!(front.lines().any(|l| l.trim() == format!("name: {name}")), "{name}: frontmatter name differs");
             assert!(front.lines().any(|l| l.starts_with("description: ")), "{name}: no description");
         }
+    }
+
+    fn skill(name: &str) -> &'static str {
+        SKILLS.iter().find(|(n, _)| *n == name).unwrap().1
+    }
+
+    #[test]
+    fn claude_grep_runs_only_when_the_user_types_it() {
+        let front = skill("claude-grep")[4..].split("\n---").next().unwrap();
+        assert!(front.lines().any(|l| l.trim() == "disable-model-invocation: true"));
+        let desc = front.lines().find(|l| l.starts_with("description: ")).unwrap().to_lowercase();
+        assert!(!desc.contains("use when"), "the description is for the / menu, not a trigger: {desc}");
+    }
+
+    #[test]
+    fn claude_grep_script_has_no_positional_placeholders() {
+        // Claude Code replaces $0, $1… in a skill with the arguments, which would break the
+        // shell script in it.
+        let bad = skill("claude-grep").as_bytes().windows(2).any(|w| w[0] == b'$' && w[1].is_ascii_digit());
+        assert!(!bad, "claude-grep has a $<digit>");
     }
 }
