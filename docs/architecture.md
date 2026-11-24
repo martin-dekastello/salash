@@ -95,12 +95,9 @@ To undo it, quit salash, then move `<folder>/.salash/state.json` (with `snapshot
   always had: `tick`, draw, wait up to 33 ms for input. It now reads input from that channel
   instead of the terminal.
 - **The `App`.** The main loop owns one `App` (`src/app/`), the state every client shares.
-  Its `impl App` is split into files by concern rather than kept in one: `issues.rs` (the
-  list, stage moves, retiring tabs), `spawn.rs` (starting panes, work dirs, worktrees),
-  `tabs.rs` (tab actions and resume), `tick.rs` (what runs every frame), `mouse.rs` and
-  `keyboard.rs` (input), with `Tab` and `IssueRt` in `tab.rs`. Methods used across files are
-  `pub(super)`, so they stay private to `app`. The unit tests in `src/app/tests/` are split the
-  same way.
+  Its `impl App` is split into one file per concern (see README § Layout), and so are its unit
+  tests. Items used across files (methods, fields, helpers) are `pub(super)`, so they stay
+  private to `app`.
 - **Drawing**: `ui::draw` runs once per frame into an off-screen buffer (ratatui
   `TestBackend`) at the shared size. Each client has a ratatui `Terminal` with a fixed viewport
   at its own size. That terminal copies the shared buffer in, dots out whatever lies beyond it
@@ -135,10 +132,9 @@ To undo it, quit salash, then move `<folder>/.salash/state.json` (with `snapshot
   server may differ in anything.
 
 - **Finished issues.** Moving an issue to Done or Archive (`App::move_stage` in
-  `src/app/issues.rs`) moves the note
-  first, then `retire_tabs` writes a `cd <dir> && claude --resume <id>` line per resumable
-  session, all in one write, and drops the panes. A tab's directory is its saved `cwd`, else
-  the issue's worktree. If the write fails, or a kept note editor would save over it, the
+  `src/app/issues.rs`) moves the note first, then `retire_tabs` writes a
+  `cd <dir> && claude --resume <id>` line per resumable session, all in one write, and drops
+  the panes. A tab's directory is its saved `cwd`, else the issue's worktree. If the write fails, or a kept note editor would save over it, the
   sessions go to the issue's closed tabs instead, which keeps it in the rescan's list until a
   later write succeeds; nothing is forgotten before it is in the note.
   Each rescan (every 3 s) runs the same cleanup for notes moved outside salash, skipping busy

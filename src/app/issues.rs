@@ -1,5 +1,6 @@
 //! The issue list: filtering, sorting, selection, stage moves, retiring tabs, sync.
 
+use super::tab::{activity, scratch_shown};
 use super::*;
 
 impl App {
@@ -415,4 +416,14 @@ impl App {
         }
         self.flash(m);
     }
+}
+
+/// Issues in these stages are finished: their tabs are stopped, and no new ones open.
+fn retires(st: Stage) -> bool {
+    matches!(st, Stage::Done | Stage::Archive)
+}
+
+/// Why an issue's stopped sessions are still in salash and not in its note.
+fn not_written(id: &str, e: &str) -> String {
+    format!("{id}: resume commands not written to the note, sessions kept for R: {e}")
 }

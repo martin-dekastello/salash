@@ -1,5 +1,6 @@
 //! Starting panes: Claude's argv, where a tab starts, worktrees, new tabs.
 
+use super::tab::WorktreeJob;
 use super::*;
 
 /// Where a tab that needs the issue's checkout starts.

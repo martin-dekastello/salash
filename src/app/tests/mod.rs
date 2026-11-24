@@ -1,5 +1,3 @@
-use super::spawn::{claude_argv, Workdir};
-use super::tabs::parse_session_id;
 use super::*;
 
 mod click;
@@ -150,7 +148,6 @@ pub(super) fn row(buf: &ratatui::buffer::Buffer, y: u16, from: u16) -> String {
 }
 
 pub(super) const S1: &str = "11111111-1111-4111-8111-111111111111";
-
 pub(super) const S2: &str = "22222222-2222-4222-8222-222222222222";
 
 /// A tab of `kind` with a fresh id, so its status file and snapshot are its own.

@@ -32,8 +32,7 @@ mod tick;
 #[cfg(test)]
 mod tests;
 
-pub use tab::{IssueRt, Tab, WorktreeJob};
-use tab::{activity, dwell, scratch_shown};
+pub use tab::{IssueRt, Tab};
 
 /// How long after Esc a Claude tab may stay silent before it counts as interrupted.
 const INTERRUPT_SETTLE_MS: i64 = 1500;
@@ -41,7 +40,6 @@ const INTERRUPT_SETTLE_MS: i64 = 1500;
 const MAX_CLOSED: usize = 10;
 /// The issue id of Scratch: tabs that belong to no issue. It has no note.
 pub const SCRATCH: &str = "scratch";
-
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Focus {
@@ -165,25 +163,14 @@ fn home() -> PathBuf {
     dirs::home_dir().unwrap_or_else(|| PathBuf::from("."))
 }
 
-
 /// The saved default directory if it still exists, otherwise salash's folder.
 fn usable_default(saved: Option<&Path>, folder: &Path) -> PathBuf {
     saved.filter(|p| p.is_dir()).unwrap_or(folder).to_path_buf()
 }
 
-/// Issues in these stages are finished: their tabs are stopped, and no new ones open.
-fn retires(st: Stage) -> bool {
-    matches!(st, Stage::Done | Stage::Archive)
-}
-
 /// "1 tab", "3 busy tabs".
 pub fn tabs_n(n: usize, adj: &str) -> String {
     format!("{n} {adj}{}", if n == 1 { "tab" } else { "tabs" })
-}
-
-/// Why an issue's stopped sessions are still in salash and not in its note.
-fn not_written(id: &str, e: &str) -> String {
-    format!("{id}: resume commands not written to the note, sessions kept for R: {e}")
 }
 
 /// A word as the shell reads it back: bare if it's only safe characters,

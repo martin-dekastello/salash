@@ -1,5 +1,7 @@
 //! #28: Done and Archive stop their tabs.
 
+use super::super::tab::WorktreeJob;
+use super::super::tabs::parse_session_id;
 use super::*;
 
 fn answer(app: &mut App, c: char) {
