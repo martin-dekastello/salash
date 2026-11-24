@@ -80,7 +80,7 @@ pub(super) fn click_app(issues: &[&str]) -> (App, TempVault) {
     // instance without leaking a new dir into /tmp on every run. Tests
     // share it, so they assert on in-memory state only.
     crate::config::set_data_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("target/salash-unit-data"));
-    let vault = TempVault(std::env::temp_dir().join(format!("salash-test-{}", uuid::Uuid::new_v4())));
+    let vault = TempVault(temp_dir());
     let cfg = Config {
         vault: vault.0.clone(),
         inject_hooks: false,
@@ -110,14 +110,6 @@ pub(super) fn with_tabs(app: &mut App, id: &str, tabs: Vec<Tab>, active: usize) 
 /// A Claude tab with no pane and no session: never started.
 pub(super) fn unstarted_tab() -> Tab {
     tab(ClaudeStatus::Exited, 0, None)
-}
-
-/// A tab whose pane runs `sleep`; dropping the pane kills it.
-pub(super) fn running_tab(dir: &Path) -> Tab {
-    let argv = ["sh".to_string(), "-c".to_string(), "sleep 30".to_string()];
-    let mut t = unstarted_tab();
-    t.pane = Some(Pane::spawn(&argv, dir, &[], 5, 40).unwrap());
-    t
 }
 
 /// Lay the screen out so the mouse hit rects are where the real UI draws them.
@@ -160,9 +152,12 @@ pub(super) fn fresh(kind: TabKind, session: Option<&str>, cwd: Option<&str>) -> 
     t
 }
 
-/// A tab of `kind` whose pane runs `sleep` with no command in front of it.
+/// A tab of `kind` whose pane runs `sleep` with no command in front of it;
+/// dropping the pane kills it.
 pub(super) fn live(kind: TabKind, dir: &Path) -> Tab {
-    let mut t = running_tab(dir);
+    let argv = ["sh".to_string(), "-c".to_string(), "sleep 30".to_string()];
+    let mut t = unstarted_tab();
+    t.pane = Some(Pane::spawn(&argv, dir, &[], 5, 40).unwrap());
     t.st.id = uuid::Uuid::new_v4().to_string();
     t.st.kind = kind;
     t

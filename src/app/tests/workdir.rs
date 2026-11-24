@@ -40,8 +40,7 @@ fn without_injection_claude_gets_neither() {
 
 #[test]
 fn resolve_dir_accepts_only_directories() {
-    let dir = std::env::temp_dir().join(format!("salash-test-{}", uuid::Uuid::new_v4()));
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = temp_dir();
     let file = dir.join("file");
     std::fs::write(&file, "").unwrap();
 
@@ -56,8 +55,7 @@ fn resolve_dir_accepts_only_directories() {
 
 #[test]
 fn a_deleted_default_falls_back_to_the_folder() {
-    let dir = std::env::temp_dir().join(format!("salash-test-{}", uuid::Uuid::new_v4()));
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = temp_dir();
     let folder = Path::new("/srv/team");
 
     assert_eq!(usable_default(Some(&dir), folder), dir);

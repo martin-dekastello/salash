@@ -24,7 +24,7 @@ fn wheel_down_sidebar(app: &mut App) {
 #[test]
 fn clicking_an_issue_focuses_its_last_active_tab() {
     let (mut app, vault) = click_app(&["a"]);
-    with_tabs(&mut app, "a", vec![unstarted_tab(), running_tab(&vault.0)], 1);
+    with_tabs(&mut app, "a", vec![unstarted_tab(), live(TabKind::Claude, &vault.0)], 1);
 
     click(&mut app, "a");
     assert_eq!(app.selected.as_deref(), Some("a"));
@@ -57,7 +57,7 @@ fn clicking_an_issue_shows_a_suspended_tab_without_resuming_it() {
 #[test]
 fn clicking_an_issue_shows_an_exited_tab_without_restarting_it() {
     let (mut app, vault) = click_app(&["a"]);
-    let mut exited = running_tab(&vault.0);
+    let mut exited = live(TabKind::Claude, &vault.0);
     exited.pane.as_mut().unwrap().exited = Some(1);
     with_tabs(&mut app, "a", vec![exited], 0);
 
