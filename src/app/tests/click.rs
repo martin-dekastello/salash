@@ -25,6 +25,7 @@ fn wheel_down_sidebar(app: &mut App) {
 fn clicking_an_issue_keeps_focus_in_the_sidebar() {
     let (mut app, vault) = click_app(&["a"]);
     with_tabs(&mut app, "a", vec![unstarted_tab(), live(TabKind::Claude, &vault.0)], 1);
+    app.focus = Focus::Terminal;
 
     click(&mut app, "a");
     assert_eq!(app.selected.as_deref(), Some("a"));
@@ -32,17 +33,25 @@ fn clicking_an_issue_keeps_focus_in_the_sidebar() {
     assert_eq!(app.rt["a"].active, 1, "the terminal still shows the last-used tab");
     assert!(app.rt["a"].tabs[0].pane.is_none());
     assert_no_spawn(&app);
+
+    // Clicking the issue that is already selected also returns to the sidebar.
+    app.focus = Focus::Terminal;
+    click(&mut app, "a");
+    assert_eq!(app.selected.as_deref(), Some("a"));
+    assert_eq!(app.focus, Focus::Sidebar);
+    assert_no_spawn(&app);
 }
 
 #[test]
-fn clicking_the_selected_issue_from_the_terminal_focuses_the_sidebar() {
-    let (mut app, vault) = click_app(&["a"]);
+fn clicking_another_issue_from_a_focused_tab_focuses_the_sidebar() {
+    let (mut app, vault) = click_app(&["a", "b"]);
     with_tabs(&mut app, "a", vec![live(TabKind::Claude, &vault.0)], 0);
+    with_tabs(&mut app, "b", vec![live(TabKind::Claude, &vault.0)], 0);
     app.select_id("a".into());
     app.focus = Focus::Terminal;
 
-    click(&mut app, "a");
-    assert_eq!(app.selected.as_deref(), Some("a"));
+    click(&mut app, "b");
+    assert_eq!(app.selected.as_deref(), Some("b"));
     assert_eq!(app.focus, Focus::Sidebar);
     assert_no_spawn(&app);
 }
@@ -59,10 +68,12 @@ fn clicking_an_issue_with_a_suspended_tab_does_not_resume_it() {
     assert!(rt.tabs[0].pane.is_none() && rt.tabs[0].suspended());
     assert_no_spawn(&app);
 
-    // ⏎ resumes it: the test's Claude command can't start, so the attempt flashes.
+    // ⏎ resumes it: the test's Claude command can't start, so the spawn error
+    // shows the command it tried.
     app.handle(Event::Key(KeyEvent::from(KeyCode::Enter)));
     assert_eq!(app.focus, Focus::Terminal);
-    assert!(app.msg.is_some(), "⏎ tried to resume the tab");
+    let msg = flashed(&app);
+    assert!(msg.starts_with("Spawn failed") && msg.contains("--resume s"), "⏎ didn't resume: {msg}");
 }
 
 #[test]
@@ -83,28 +94,19 @@ fn clicking_an_issue_with_an_exited_tab_does_not_restart_it() {
 #[test]
 fn clicking_a_busy_issue_then_d_asks_to_move_it_to_done() {
     let (mut app, vault) = click_app(&["a"]);
-    let argv = ["sh".to_string(), "-i".to_string()];
-    let env = [("PS1".to_string(), "prompt> ".to_string()), ("ENV".to_string(), "/dev/null".to_string())];
-    let mut t = fresh(TabKind::Shell, None, None);
-    t.pane = Some(Pane::spawn(&argv, &vault.0, &env, 10, 60).unwrap());
-    let wait = |t: &Tab, f: &dyn Fn(&Tab) -> bool| {
-        let start = Instant::now();
-        while !f(t) {
-            assert!(start.elapsed() < Duration::from_secs(5));
-            std::thread::sleep(Duration::from_millis(10));
-        }
-    };
-    wait(&t, &|t| t.pane.as_ref().unwrap().snapshot(&[]).windows(7).any(|w| w == b"prompt>"));
-    t.pane.as_mut().unwrap().write(b"sleep 30\r");
-    wait(&t, &|t| t.busy_label().is_some_and(|b| b != "shell: running command"));
+    let mut t = live(TabKind::Claude, &vault.0);
+    t.status = ClaudeStatus::Working;
     with_tabs(&mut app, "a", vec![t], 0);
+    app.select_id("a".into());
+    app.focus = Focus::Terminal;
 
     click(&mut app, "a");
-    // With the terminal focused, `d` would go to the shell and no dialog would open.
-    key(&mut app, 'd');
+    // `answer` goes through focus routing: had the click left the terminal
+    // focused, `d` would reach Claude and no dialog would open.
+    answer(&mut app, 'd');
     let Mode::Confirm(ConfirmKind::Retire { issue, stage, busy }) = app.mode.clone() else { panic!("`d` didn't reach the sidebar") };
     assert_eq!((issue.as_str(), stage), ("a", Stage::Done));
-    assert_eq!(busy, ["shell: sleep"]);
+    assert_eq!(busy, ["Claude: working"]);
 }
 
 #[test]
@@ -123,23 +125,6 @@ fn clicking_a_tab_header_focuses_the_terminal() {
         assert_eq!(app.rt["a"].active, i);
     }
     assert!(app.rt["a"].tabs[1].suspended(), "showing a suspended tab doesn't resume it");
-    assert_no_spawn(&app);
-}
-
-#[test]
-fn clicking_an_issue_without_a_live_tab_stays_in_the_sidebar() {
-    let (mut app, _vault) = click_app(&["empty", "unstarted"]);
-    with_tabs(&mut app, "unstarted", vec![unstarted_tab()], 0);
-
-    click(&mut app, "empty");
-    assert_eq!(app.selected.as_deref(), Some("empty"));
-    assert_eq!(app.focus, Focus::Sidebar);
-    assert!(app.rt["empty"].tabs.is_empty() && app.rt["empty"].worktree.is_none());
-
-    click(&mut app, "unstarted");
-    assert_eq!(app.selected.as_deref(), Some("unstarted"));
-    assert_eq!(app.focus, Focus::Sidebar);
-    assert!(app.rt["unstarted"].tabs[0].pane.is_none());
     assert_no_spawn(&app);
 }
 

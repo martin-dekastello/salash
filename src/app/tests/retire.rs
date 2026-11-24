@@ -4,10 +4,6 @@ use super::super::types::WorktreeJob;
 use super::super::tabs::parse_session_id;
 use super::*;
 
-fn answer(app: &mut App, c: char) {
-    app.handle(Event::Key(KeyEvent::from(KeyCode::Char(c))));
-}
-
 #[test]
 fn done_stops_idle_tabs_and_keeps_resume_commands_in_the_note() {
     let (mut app, vault) = click_app(&["a", "b"]);

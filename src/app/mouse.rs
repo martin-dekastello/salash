@@ -145,10 +145,8 @@ impl App {
                     self.set_view(s);
                     self.focus = Focus::Sidebar;
                 } else if let Some((_, id)) = self.item_hits.iter().find(|(r, _)| r.contains(pos)).cloned() {
-                    // A click only selects: focus stays in (or returns to) the
-                    // sidebar, so its keys act on the issue. The terminal still
-                    // shows the issue's tab, dimmed. Unlike ⏎, a click never
-                    // starts, restarts or resumes a tab.
+                    // A click only selects and focuses the sidebar, so its keys act
+                    // on the issue. Unlike ⏎, it never starts, restarts or resumes a tab.
                     self.select_id(id);
                     self.focus = Focus::Sidebar;
                 } else if self.frame_rect.contains(pos) {
