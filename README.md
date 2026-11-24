@@ -447,7 +447,16 @@ src/
   query.rs      what `salash mcp` asks the server, and the answers
   mcp.rs        `salash mcp`: the MCP server (rmcp) on stdio
   instance.rs   one salash per folder: .salash, socket, lock, moving old state
-  app.rs        state, input routing, tab lifecycle, status polling
+  app/          the App: state, input routing, tab lifecycle, status polling
+    mod.rs      App struct, modes and focus, construction, shared helpers
+    types.rs    Tab and an issue's tabs (IssueRt), status rollup
+    issues.rs   the issue list: filter, sort, select, stage moves, retiring tabs, sync
+    spawn.rs    starting panes: claude argv, work dirs, worktrees, new tabs
+    tabs.rs     tab actions: open/switch/close/reopen/suspend/resume, API requests
+    tick.rs     periodic work: status polling, marking tabs seen, bell, resize
+    mouse.rs    mouse, paste and text selection
+    keyboard.rs key routing: sidebar, terminal, command and prefix keys
+    tests/      unit tests, split by the same topics
   ui.rs         ratatui rendering (sidebar, tab bar, terminal, popups)
   term.rs       PTY + vt100 pane (portable-pty, tui-term)
   keys.rs       key event -> terminal bytes
