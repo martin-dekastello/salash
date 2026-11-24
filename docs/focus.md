@@ -1,8 +1,8 @@
 # Sidebar and terminal focus
 
 Keys go to one of two places: the **sidebar** (salash's own keys: `d`, `a`, `x`, `c`, `j`/`k`…)
-or the **terminal** (the active tab's shell, Claude or editor). `App::focus` holds which one,
-per client (see [multi-client.md](multi-client.md)).
+or the **terminal** (the active tab's shell, Claude or editor). `App::focus` holds which one.
+It is shared by all clients (see [multi-client.md](multi-client.md)).
 
 ## Focus is shown, not guessed
 
@@ -29,6 +29,14 @@ The rule now (`App::on_mouse`, the `item_hits` branch):
 - A click never starts, restarts or resumes a tab; `⏎` does.
 - Moving into the tab is explicit: `⏎`, `Tab` / `prefix s`, or a click on the terminal, a tab
   header or the frame line.
+
+Focus is shared while client views are mirrored, so one client's click on an issue moves every
+client to the sidebar: someone typing into a tab in another client has their next keys go to the
+sidebar. #20 moved everyone too, but into a terminal. We accept this until per-client views land.
+
+The sidebar wheel and `prefix j`/`k` are different on purpose: they keep terminal focus when the
+next issue has a live tab (`App::after_issue_switch`). They browse tabs, while a click picks an
+issue to act on.
 
 What this rules out: don't put `focus_tab_if_live()` back on the issue click "for convenience".
 The sidebar's single-letter keys depend on the click leaving focus where it is.

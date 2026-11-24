@@ -322,8 +322,8 @@ The mouse is captured so you can click issues, tabs, the To-do/Active/Done/Archi
 a tab's `×` to close it, and `quit` at the top of the sidebar. Clicking an issue selects it
 and keeps focus in the sidebar, so its keys (`d`, `a`, `x`…) act on that issue. The terminal
 shows its last-used tab, dimmed. To type into it, press `⏎` or `Tab`/`prefix s`, or click the
-terminal, a tab header or the frame. A click never starts a tab, and a suspended or exited
-tab stays stopped until `⏎`. To get back to the sidebar, press `prefix s` or click an issue
+terminal, a tab header or the frame. Clicking an issue never starts a tab, and a suspended
+or exited tab stays stopped until `⏎`. To get back to the sidebar, press `prefix s` or click an issue
 or a view name. Closing and quitting ask first. Inside a tab, the wheel, clicks and
 drags go to the app when it handles the mouse itself, as Claude Code does with
 `"tui": "fullscreen"`. Apps on the alternate screen that don't (`less`) get arrow keys from
