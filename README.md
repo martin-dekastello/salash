@@ -451,7 +451,7 @@ src/
   instance.rs   one salash per folder: .salash, socket, lock, moving old state
   app/          the App: state, input routing, tab lifecycle, status polling
     mod.rs      App struct, modes and focus, construction, shared helpers
-    tab.rs      Tab and an issue's tabs (IssueRt), status rollup
+    types.rs    Tab and an issue's tabs (IssueRt), status rollup
     issues.rs   the issue list: filter, sort, select, stage moves, retiring tabs, sync
     spawn.rs    starting panes: claude argv, work dirs, worktrees, new tabs
     tabs.rs     tab actions: open/switch/close/reopen/suspend/resume, API requests

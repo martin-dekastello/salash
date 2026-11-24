@@ -1,6 +1,6 @@
 //! Tab status: seen, done, interrupts, ranking, change notifications.
 
-use super::super::tab::{activity, dwell, scratch_shown};
+use super::super::types::{activity, dwell, scratch_shown};
 use super::*;
 
 #[test]

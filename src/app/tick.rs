@@ -1,6 +1,6 @@
 //! Periodic work: status polling, marking tabs seen, the bell, resizing.
 
-use super::tab::dwell;
+use super::types::dwell;
 use super::*;
 
 impl App {

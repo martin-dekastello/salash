@@ -26,13 +26,13 @@ mod issues;
 mod keyboard;
 mod mouse;
 mod spawn;
-mod tab;
 mod tabs;
-mod tick;
 #[cfg(test)]
 mod tests;
+mod tick;
+mod types;
 
-pub use tab::{IssueRt, Tab};
+pub use types::{IssueRt, Tab};
 
 /// How long after Esc a Claude tab may stay silent before it counts as interrupted.
 const INTERRUPT_SETTLE_MS: i64 = 1500;

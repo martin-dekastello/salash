@@ -1,6 +1,6 @@
 //! The issue list: filtering, sorting, selection, stage moves, retiring tabs, sync.
 
-use super::tab::{activity, scratch_shown};
+use super::types::{activity, scratch_shown};
 use super::*;
 
 impl App {

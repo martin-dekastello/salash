@@ -1,6 +1,6 @@
 //! #28: Done and Archive stop their tabs.
 
-use super::super::tab::WorktreeJob;
+use super::super::types::WorktreeJob;
 use super::super::tabs::parse_session_id;
 use super::*;
 
