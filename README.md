@@ -378,6 +378,24 @@ brief as its first prompt. It's like `/new-claude-tmux`, but without tmux. Loadi
 with `--plugin-dir` needs Claude Code 2.1.74 or later. The skill used to be called
 `/salash:new-salash-tab`; it is now `/salash:new-tab`.
 
+`/salash:claude-grep [all] <query>` finds old Claude Code conversations by what you or Claude
+said in them. Tool calls, tool output and thinking don't count. It searches this project's
+sessions, including its worktrees, or every project with `all`. Claude reads the query and
+builds the search from it:
+
+| query | finds sessions that |
+|---|---|
+| `foo OR bar`, `foo \| bar` | say either |
+| `foo bar`, `foo AND bar` | say both, anywhere in the session |
+| `"foo bar"` | say the exact phrase |
+| `foo -bar`, `foo NOT bar` | say `foo` but never `bar` |
+| `that time we fixed the resize bug` | match the key terms and synonyms Claude picks |
+
+Matching ignores case unless you type capitals. Claude shows the query it built, then up to
+20 sessions, newest first, each with its date, project, session id, title and the matching
+text. Resume one with `claude --resume <id>`, or press `I` in salash and paste the id. The
+skill runs only when you type it: Claude never starts it by itself. It needs `jq`.
+
 Older salash versions had `salash install-skill`. If you ran it, delete
 `~/.claude/skills/new-salash-tab`. Until you do, the old copy shows up as `/new-salash-tab`
 next to `/salash:new-tab` and doesn't change when salash is upgraded. It also works the old
