@@ -54,9 +54,10 @@ window:
   `SSH_AUTH_SOCK`, tokens. Attaching later doesn't change it, much as tmux behaves without
   `update-environment`.
 - Config: the server reads the starting user's `~/.config/salash/config.toml` plus the
-  folder's `.salash/config.toml`. On a shared server, put team settings (vault, GitHub
-  sources, prefix) in the folder's file. Commands, repo paths and Jira stay in the starting
-  user's own config; the folder's file can't set them.
+  folder's `.salash/config.toml`. On a shared server, put team settings (vault, which sources
+  sync, prefix) in the folder's file. The sources themselves, commands, repo paths, tokens and
+  Jira emails stay in the starting user's own config: the folder's file only picks from its
+  sources ([#43](https://github.com/martin-dekastello/salash/issues/43)).
 
 ## Settings for later
 

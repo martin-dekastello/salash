@@ -206,14 +206,13 @@ fn entry(account: &str) -> Result<keyring::Entry> {
     })
 }
 
-/// Whether any config, the merged one or your own without the folder's,
-/// has this source. Only for a note, so a config that doesn't load is a yes.
+/// Whether your own config lists this source. Only for a note, so a config
+/// that doesn't load is a yes.
 fn configured(account: &str, load: impl FnOnce() -> Result<Config>) -> bool {
     if !crate::config::config_path().exists() {
         return true;
     }
-    let has = |cfg: Result<Config>| cfg.map_or(true, |c| providers::from_config(&c).iter().any(|p| p.name() == account));
-    has(load()) || has(Config::load_for(None).map(|(c, _)| c))
+    load().map_or(true, |c| providers::from_catalog(&c).iter().any(|p| p.name() == account))
 }
 
 /// The token for `set`, from a no-echo prompt or from stdin, never from argv.
@@ -281,7 +280,8 @@ pub fn run(cmd: TokenCmd, load: impl FnOnce() -> Result<Config>) -> Result<()> {
             }
         }
         TokenCmd::Status => {
-            let sources = providers::from_config(&load()?);
+            // Every source you list: a token matters wherever a folder picks it.
+            let sources = providers::from_catalog(&load()?);
             if sources.is_empty() {
                 println!("No [[github]] or [[jira]] sources in config");
             }

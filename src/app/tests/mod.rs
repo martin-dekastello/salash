@@ -6,6 +6,7 @@ mod resume;
 mod retire;
 mod seen;
 mod sort;
+mod sync;
 mod workdir;
 
 pub(super) fn tab(status: ClaudeStatus, status_ts: i64, esc_ts: Option<i64>) -> Tab {

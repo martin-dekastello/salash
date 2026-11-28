@@ -79,8 +79,15 @@ pub struct Config {
     pub mouse: bool,
     /// "auto" (match the terminal's background), "dark" or "light".
     pub theme: String,
+    /// The sources this folder syncs: the folder config's selection from
+    /// `catalog_*`. Empty without a folder config, or outside any folder.
     pub github: Vec<GithubSource>,
     pub jira: Vec<JiraSource>,
+    /// The sources your own config lists: the only ones a folder may select.
+    #[serde(skip)]
+    pub catalog_github: Vec<GithubSource>,
+    #[serde(skip)]
+    pub catalog_jira: Vec<JiraSource>,
     /// What the folder's `.salash/config.toml` tried to set but may not.
     #[serde(skip)]
     pub ignored: Vec<String>,
@@ -112,15 +119,19 @@ impl Default for Config {
             theme: "auto".into(),
             github: vec![],
             jira: vec![],
+            catalog_github: vec![],
+            catalog_jira: vec![],
             ignored: vec![],
         }
     }
 }
 
 const TEMPLATE: &str = r#"# salash configuration
-# <folder>/.salash/config.toml can override vault, notes_dir, prefix, local_prefix,
-# bell, mouse, worktrees and [[github]] (without path) for `salash <folder>`. Commands, repo
-# paths and Jira only come from here: a repo can ship its own .salash/config.toml.
+# The [[github]] and [[jira]] sources here are a catalog: none of them syncs until a folder
+# picks it. `salash <folder>` asks which, or run `salash sources add <repo|url>` there; the
+# picks go to <folder>/.salash/config.toml. That file can also override vault, notes_dir,
+# prefix, local_prefix, bell, mouse and worktrees. Commands, repo paths, emails and
+# token_env only come from here: a repo can ship its own .salash/config.toml.
 
 # Obsidian vault root and the folder inside it that holds active/ done/ archive/
 vault = "{VAULT}"
@@ -164,6 +175,7 @@ prefix = "ctrl-a"
 # - Jira: "Create API token with scopes", app Jira, scope read:jira-work:
 #   https://id.atlassian.com/manage-profile/security/api-tokens
 
+# Sources you trust. A folder syncs only those it picks.
 # [[github]]
 # repo = "owner/transport-sim"
 # path = "~/code/transport-sim"   # local clone for worktrees
@@ -254,7 +266,10 @@ impl Config {
     /// Load the config, writing a commented template on first run, with a
     /// folder's `.salash/config.toml` over it if given.
     pub fn load_for(instance_dir: Option<&Path>) -> Result<(Config, bool)> {
-        let path = config_path();
+        Config::load_at(&config_path(), instance_dir)
+    }
+
+    fn load_at(path: &Path, instance_dir: Option<&Path>) -> Result<(Config, bool)> {
         let mut created = false;
         if !path.exists() {
             let d = Config::default();
@@ -264,18 +279,23 @@ impl Config {
             if let Some(parent) = path.parent() {
                 std::fs::create_dir_all(parent)?;
             }
-            std::fs::write(&path, text)?;
+            std::fs::write(path, text)?;
             created = true;
         }
-        let text = std::fs::read_to_string(&path)
+        let text = std::fs::read_to_string(path)
             .with_context(|| format!("reading {}", path.display()))?;
         let mut table: toml::Table =
             toml::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
+        let own: Config = toml::Value::Table(table.clone())
+            .try_into()
+            .with_context(|| format!("parsing {}", path.display()))?;
         let mut ignored = vec![];
         let mut sources = path.display().to_string();
+        // Your sources are a catalog: a folder syncs only what its config picks.
+        let mut picked = toml::Table::new();
         if let Some(over) = instance_dir.map(|d| d.join("config.toml")).filter(|p| p.exists()) {
-            let (mut t, dropped) = folder_overlay(&over)?;
-            keep_own_github_keys(&table, &mut t);
+            let (mut t, mut dropped) = folder_overlay(&over)?;
+            picked = select_sources(&table, &mut t, &mut dropped);
             if !dropped.is_empty() {
                 eprintln!("ignored in {}: {}", over.display(), dropped.join(", "));
             }
@@ -283,20 +303,38 @@ impl Config {
             merge(&mut table, t);
             sources = format!("{sources} with {}", over.display());
         }
+        for key in ["github", "jira"] {
+            match picked.remove(key) {
+                Some(v) => table.insert(key.into(), v),
+                None => table.remove(key),
+            };
+        }
         let mut cfg: Config = toml::Value::Table(table)
             .try_into()
             .with_context(|| format!("parsing {sources}"))?;
         cfg.ignored = ignored;
+        cfg.catalog_github = own.github;
+        cfg.catalog_jira = own.jira;
         cfg.vault = expand(&cfg.vault);
         cfg.worktrees_dir = expand(&cfg.worktrees_dir);
         cfg.local_repo = cfg.local_repo.as_deref().map(expand);
-        for g in &mut cfg.github {
+        for g in cfg.github.iter_mut().chain(&mut cfg.catalog_github) {
             g.path = g.path.as_deref().map(expand);
         }
-        for j in &mut cfg.jira {
+        for j in cfg.jira.iter_mut().chain(&mut cfg.catalog_jira) {
             j.path = j.path.as_deref().map(expand);
         }
         Ok((cfg, created))
+    }
+
+    /// What to say when this folder syncs nothing.
+    pub fn no_sources_hint(&self) -> String {
+        match self.catalog_github.len() + self.catalog_jira.len() {
+            0 => format!("No [[github]] or [[jira]] sources in {}", shorten(&config_path())),
+            n => format!(
+                "No sources for this folder: `salash sources add <repo|url>` (your config lists {n})"
+            ),
+        }
     }
 
     pub fn notes_root(&self) -> PathBuf {
@@ -325,12 +363,16 @@ impl Config {
         vec!["vi".into()]
     }
 
+    /// The source an issue came from: this folder's pick, else your own entry,
+    /// so notes from sources the folder doesn't sync still find their repo.
     fn github_for(&self, repo: Option<&str>) -> Option<&GithubSource> {
-        self.github.iter().find(|g| Some(g.repo.as_str()) == repo)
+        let repo = repo?;
+        self.github.iter().chain(&self.catalog_github).find(|g| same_repo(&g.repo, repo))
     }
 
     fn jira_for(&self, repo: Option<&str>) -> Option<&JiraSource> {
-        self.jira.iter().find(|j| Some(j.url.as_str()) == repo).or(self.jira.first())
+        let all = || self.jira.iter().chain(&self.catalog_jira);
+        repo.and_then(|r| all().find(|j| same_site(&j.url, r))).or_else(|| all().next())
     }
 
     /// Resolve the local repository path for an issue.
@@ -355,10 +397,34 @@ impl Config {
 
 /// What a folder's own config may set. A cloned repo can ship
 /// `.salash/config.toml`, so nothing that runs commands or sends credentials:
-/// no `*_command`, no repo paths (worktrees run their hooks), no Jira, and no
-/// `token_env` (it would choose which env var's secret salash sends).
-/// `worktrees` only turns worktrees off or back on, so it may.
-const FOLDER_KEYS: &[&str] = &["vault", "notes_dir", "prefix", "local_prefix", "bell", "mouse", "worktrees", "github"];
+/// no `*_command`, no repo paths (worktrees run their hooks), and no
+/// `token_env` or Jira `email` (they choose which secret salash sends, and as whom).
+/// `worktrees` only turns worktrees off or back on, so it may. `[[github]]` and
+/// `[[jira]]` only pick from your own sources (`select_sources`).
+const FOLDER_KEYS: &[&str] =
+    &["vault", "notes_dir", "prefix", "local_prefix", "bell", "mouse", "worktrees", "github", "jira"];
+
+/// Keys of a folder's source that only your own config may set.
+const OWN_SOURCE_KEYS: &[(&str, &[&str])] = &[("github", &["path", "token_env"]), ("jira", &["path", "token_env", "email"])];
+
+/// The key that names a source: GitHub `repo`, Jira `url`.
+fn source_key(kind: &str) -> &'static str {
+    if kind == "jira" { "url" } else { "repo" }
+}
+
+/// GitHub repo names ignore case.
+pub fn same_repo(a: &str, b: &str) -> bool {
+    a.eq_ignore_ascii_case(b)
+}
+
+/// Jira sites match with or without a trailing slash.
+pub fn same_site(a: &str, b: &str) -> bool {
+    a.trim_end_matches('/').eq_ignore_ascii_case(b.trim_end_matches('/'))
+}
+
+fn same_source(kind: &str, a: &str, b: &str) -> bool {
+    if kind == "jira" { same_site(a, b) } else { same_repo(a, b) }
+}
 
 /// A folder's `.salash/config.toml`, cut down to `FOLDER_KEYS`, and the keys it lost.
 fn folder_overlay(path: &Path) -> Result<(toml::Table, Vec<String>)> {
@@ -372,11 +438,11 @@ fn folder_overlay(path: &Path) -> Result<(toml::Table, Vec<String>)> {
             dropped.push(k);
             continue;
         }
-        if k == "github" {
-            for g in v.as_array_mut().into_iter().flatten().filter_map(|g| g.as_table_mut()) {
-                for key in ["path", "token_env"] {
-                    let name = format!("github.{key}");
-                    if g.remove(key).is_some() && !dropped.contains(&name) {
+        if let Some((_, keys)) = OWN_SOURCE_KEYS.iter().find(|(kind, _)| *kind == k) {
+            for s in v.as_array_mut().into_iter().flatten().filter_map(|s| s.as_table_mut()) {
+                for key in *keys {
+                    let name = format!("{k}.{key}");
+                    if s.remove(*key).is_some() && !dropped.contains(&name) {
                         dropped.push(name);
                     }
                 }
@@ -387,21 +453,43 @@ fn folder_overlay(path: &Path) -> Result<(toml::Table, Vec<String>)> {
     Ok((kept, dropped))
 }
 
-/// A folder's `[[github]]` replaces yours, without `path` and `token_env`.
-/// For a repo your own config also lists, keep the ones you set there.
-fn keep_own_github_keys(own: &toml::Table, folder: &mut toml::Table) {
-    let Some(mine) = own.get("github").and_then(|g| g.as_array()) else { return };
-    let theirs = folder.get_mut("github").and_then(|g| g.as_array_mut());
-    for g in theirs.into_iter().flatten().filter_map(|g| g.as_table_mut()) {
-        let Some(m) = mine.iter().filter_map(|m| m.as_table()).find(|m| m.get("repo") == g.get("repo")) else {
-            continue;
-        };
-        for key in ["path", "token_env"] {
-            if let Some(v) = m.get(key) {
-                g.insert(key.into(), v.clone());
+/// Take the folder's `[[github]]` / `[[jira]]` out of `folder` and match each
+/// to your own entry with the same repo / url: yours, with the folder's keys
+/// (`search`, `jql`, `id_prefix`, `worktrees`) on top. One you don't list is
+/// dropped and reported, so a cloned repo can't make salash send a token to a
+/// source you never chose.
+fn select_sources(own: &toml::Table, folder: &mut toml::Table, dropped: &mut Vec<String>) -> toml::Table {
+    let mut picked = toml::Table::new();
+    for kind in ["github", "jira"] {
+        let Some(theirs) = folder.remove(kind) else { continue };
+        let key = source_key(kind);
+        let mine: Vec<&toml::Table> =
+            own.get(kind).and_then(|v| v.as_array()).into_iter().flatten().filter_map(|m| m.as_table()).collect();
+        let mut out: Vec<toml::Value> = vec![];
+        for s in theirs.as_array().into_iter().flatten() {
+            let Some(name) = s.get(key).and_then(|n| n.as_str()) else {
+                dropped.push(format!("{kind} without {key}"));
+                continue;
+            };
+            let found = mine.iter().find(|m| m.get(key).and_then(|v| v.as_str()).is_some_and(|v| same_source(kind, v, name)));
+            let Some(m) = found else {
+                dropped.push(format!("{kind} {name:?} (not in your config)"));
+                continue;
+            };
+            let mut merged = (*m).clone();
+            for (k, v) in s.as_table().into_iter().flatten() {
+                if k != key {
+                    merged.insert(k.clone(), v.clone());
+                }
+            }
+            let dup = out.iter().any(|o| o.get(key).and_then(|v| v.as_str()) == merged.get(key).and_then(|v| v.as_str()));
+            if !dup {
+                out.push(toml::Value::Table(merged));
             }
         }
+        picked.insert(kind.into(), toml::Value::Array(out));
     }
+    picked
 }
 
 /// Put `over` on top of `base`: tables merge key by key, anything else
@@ -552,6 +640,8 @@ mod tests {
             [[jira]]
             url = "https://evil.example"
             email = "x"
+            token_env = "AWS_SECRET_ACCESS_KEY"
+            path = "/evil.git"
             "#,
         )
         .unwrap();
@@ -559,7 +649,11 @@ mod tests {
         assert_eq!(t["vault"].as_str(), Some("/team"));
         assert_eq!(t["github"][0]["repo"].as_str(), Some("a/one"));
         assert!(t["github"][0].get("path").is_none());
-        for k in ["claude_command", "shell_command", "worktree_command", "local_repo", "jira", "github.path"] {
+        assert_eq!(t["jira"][0]["url"].as_str(), Some("https://evil.example"));
+        for key in ["email", "token_env", "path"] {
+            assert!(t["jira"][0].get(key).is_none(), "jira.{key} kept");
+        }
+        for k in ["claude_command", "shell_command", "worktree_command", "local_repo", "github.path", "jira.email", "jira.token_env", "jira.path"] {
             assert!(dropped.iter().any(|d| d == k), "{k} not dropped: {dropped:?}");
             assert!(!t.contains_key(k));
         }
@@ -587,32 +681,149 @@ mod tests {
         std::fs::remove_dir_all(dir).ok();
     }
 
+    /// A temp dir with your own config and, if given, a folder config.
+    fn setup(own: &str, folder: Option<&str>) -> (PathBuf, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("salash-test-{}", uuid::Uuid::new_v4()));
+        let inst = dir.join(".salash");
+        std::fs::create_dir_all(&inst).unwrap();
+        std::fs::write(dir.join("own.toml"), own).unwrap();
+        if let Some(f) = folder {
+            std::fs::write(inst.join("config.toml"), f).unwrap();
+        }
+        (dir, inst)
+    }
+
+    fn load(own: &str, folder: Option<&str>) -> Config {
+        let (dir, inst) = setup(own, folder);
+        let cfg = Config::load_at(&dir.join("own.toml"), Some(&inst)).unwrap().0;
+        std::fs::remove_dir_all(dir).ok();
+        cfg
+    }
+
+    const CATALOG: &str = r#"
+        [[github]]
+        repo = "a/one"
+        path = "~/code/one"
+        token_env = "WORK_GH_TOKEN"
+        id_prefix = "ONE"
+        search = "assignee:@me"
+        [[github]]
+        repo = "a/two"
+        [[jira]]
+        url = "https://co.atlassian.net"
+        email = "me@example.com"
+        token_env = "CO_JIRA"
+        path = "~/code/backend"
+        jql = "assignee = currentUser()"
+        [[jira]]
+        url = "https://other.atlassian.net"
+        email = "me@example.com"
+    "#;
+
     #[test]
-    fn a_folder_github_keeps_your_own_path_and_token_env_for_the_same_repo() {
-        let own: toml::Table = toml::from_str(
-            r#"
-            [[github]]
-            repo = "a/one"
-            path = "~/code/one"
-            token_env = "WORK_GH_TOKEN"
-            "#,
-        )
-        .unwrap();
-        let mut folder: toml::Table = toml::from_str(
-            r#"
-            [[github]]
-            repo = "a/one"
-            search = "label:bug"
-            [[github]]
-            repo = "a/two"
-            "#,
-        )
-        .unwrap();
-        keep_own_github_keys(&own, &mut folder);
-        let g = &folder["github"];
-        assert_eq!(g[0]["token_env"].as_str(), Some("WORK_GH_TOKEN"));
-        assert_eq!(g[0]["path"].as_str(), Some("~/code/one"));
-        assert_eq!(g[0]["search"].as_str(), Some("label:bug"));
-        assert!(g[1].get("token_env").is_none());
+    fn a_folder_syncs_only_the_sources_it_picks() {
+        let cfg = load(CATALOG, Some("[[github]]\nrepo = \"a/two\"\n"));
+        let repos: Vec<_> = cfg.github.iter().map(|g| g.repo.as_str()).collect();
+        assert_eq!(repos, ["a/two"]);
+        assert!(cfg.jira.is_empty());
+        assert_eq!(cfg.catalog_github.len(), 2);
+        assert_eq!(cfg.catalog_jira.len(), 2);
+        assert!(cfg.ignored.is_empty(), "{:?}", cfg.ignored);
+    }
+
+    #[test]
+    fn no_folder_config_means_no_sources() {
+        let cfg = load(CATALOG, None);
+        assert!(cfg.github.is_empty() && cfg.jira.is_empty());
+        assert_eq!(cfg.catalog_github.len(), 2);
+        assert!(cfg.no_sources_hint().contains("your config lists 4"), "{}", cfg.no_sources_hint());
+        // A folder config without sources also syncs nothing.
+        let cfg = load(CATALOG, Some("vault = \"/team\"\n"));
+        assert!(cfg.github.is_empty() && cfg.jira.is_empty());
+        assert_eq!(cfg.vault, PathBuf::from("/team"));
+        // Nor does salash outside any folder.
+        let (dir, _) = setup(CATALOG, None);
+        let cfg = Config::load_at(&dir.join("own.toml"), None).unwrap().0;
+        assert!(cfg.github.is_empty() && cfg.jira.is_empty());
+        assert_eq!(cfg.catalog_jira.len(), 2);
+        std::fs::remove_dir_all(dir).ok();
+        let empty = load("", None);
+        assert!(empty.no_sources_hint().starts_with("No [[github]] or [[jira]] sources in"));
+    }
+
+    #[test]
+    fn a_folder_jira_takes_email_token_env_and_path_from_yours() {
+        let cfg = load(
+            CATALOG,
+            Some("[[jira]]\nurl = \"https://co.atlassian.net/\"\njql = \"project = BE\"\nworktrees = false\n"),
+        );
+        assert_eq!(cfg.jira.len(), 1);
+        let j = &cfg.jira[0];
+        assert_eq!(j.url, "https://co.atlassian.net");
+        assert_eq!(j.email, "me@example.com");
+        assert_eq!(j.token_env.as_deref(), Some("CO_JIRA"));
+        assert_eq!(j.path, Some(expand(Path::new("~/code/backend"))));
+        assert_eq!(j.jql.as_deref(), Some("project = BE"));
+        assert_eq!(j.worktrees, Some(false));
+        assert!(!cfg.worktrees_for("jira", Some("https://co.atlassian.net")));
+    }
+
+    #[test]
+    fn a_folder_github_inherits_your_keys_and_overrides_its_own() {
+        let cfg = load(CATALOG, Some("[[github]]\nrepo = \"A/One\"\nsearch = \"label:bug\"\n"));
+        let g = &cfg.github[0];
+        assert_eq!(g.repo, "a/one", "your spelling wins");
+        assert_eq!(g.token_env.as_deref(), Some("WORK_GH_TOKEN"));
+        assert_eq!(g.path, Some(expand(Path::new("~/code/one"))));
+        assert_eq!(g.id_prefix.as_deref(), Some("ONE"), "note ids stay the same");
+        assert_eq!(g.search.as_deref(), Some("label:bug"));
+    }
+
+    #[test]
+    fn a_folder_source_you_dont_list_is_dropped_and_reported() {
+        let cfg = load(
+            CATALOG,
+            Some(
+                r#"
+                [[github]]
+                repo = "evil/repo"
+                token_env = "AWS_SECRET_ACCESS_KEY"
+                [[github]]
+                search = "no repo"
+                [[jira]]
+                url = "https://evil.example"
+                email = "x"
+                [[github]]
+                repo = "a/one"
+                [[github]]
+                repo = "a/one"
+                "#,
+            ),
+        );
+        let repos: Vec<_> = cfg.github.iter().map(|g| g.repo.as_str()).collect();
+        assert_eq!(repos, ["a/one"], "unknown dropped, duplicate kept once");
+        assert!(cfg.jira.is_empty());
+        for d in ["github \"evil/repo\" (not in your config)", "github without repo", "jira \"https://evil.example\" (not in your config)", "github.token_env", "jira.email"] {
+            assert!(cfg.ignored.iter().any(|i| i == d), "{d} not reported: {:?}", cfg.ignored);
+        }
+        // Nothing for the dropped source, so no token is ever looked up for it.
+        let names: Vec<_> = crate::providers::from_config(&cfg).iter().map(|p| p.name()).collect();
+        assert_eq!(names, ["github:a/one"]);
+    }
+
+    #[test]
+    fn notes_from_sources_the_folder_skips_still_find_their_repo() {
+        let cfg = load(CATALOG, Some("[[github]]\nrepo = \"a/two\"\n"));
+        assert_eq!(cfg.repo_path_for("github", Some("a/one")), Some(expand(Path::new("~/code/one"))));
+        assert_eq!(cfg.repo_path_for("jira", Some("https://co.atlassian.net")), Some(expand(Path::new("~/code/backend"))));
+        assert_eq!(cfg.repo_path_for("github", None), None);
+    }
+
+    #[test]
+    fn source_names_match_loosely() {
+        assert!(same_repo("Owner/Repo", "owner/repo"));
+        assert!(!same_repo("owner/repo", "owner/repo2"));
+        assert!(same_site("https://x.atlassian.net/", "https://x.atlassian.net"));
+        assert!(!same_site("https://x.atlassian.net", "https://y.atlassian.net"));
     }
 }

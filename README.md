@@ -115,12 +115,55 @@ from salash, see [Tokens](#tokens), or its own login), a Jira API token for Jira
 
 `~/.config/salash/config.toml` on Linux, `~/Library/Application Support/salash/config.toml`
 on macOS. Override with `$SALASH_CONFIG`.
-A folder's `.salash/config.toml` overrides some of it for that folder's salash: `vault`,
-`notes_dir`, `prefix`, `local_prefix`, `bell`, `mouse`, `worktrees` and `[[github]]` sources
-(without `path` and `token_env`; for a repo your own config also lists, yours are kept). For
-example, give a team folder its own vault and sources. Commands, repo paths, `token_env` and Jira
-only come from your own config, because a repo you clone can ship a `.salash/config.toml`.
-salash ignores the rest and says so when it starts.
+
+### Sources per folder
+
+The `[[github]]` and `[[jira]]` sources in your config are a **catalog** of the sources you
+trust. None of them syncs until a folder picks it in its `.salash/config.toml`, so a folder
+only gets the issues that belong to it. The first `salash` in a folder without that file asks:
+
+```
+New salash folder: ~/code/backend
+Obsidian vault for its notes [~/Documents/Obsidian]:
+Sources in your config ([x] = this folder's repo):
+  [x]  1  github  owner/backend
+  [ ]  2  github  owner/transport-sim
+  [ ]  3  jira    https://yourcompany.atlassian.net
+Sync which here? Numbers, or none [1]:
+```
+
+The folder's own repo (its `git remote`, or a source whose `path` is the folder) is picked by
+default. A clone of a GitHub repo your config doesn't list yet can be added to it from there.
+Several folders can pick the same vault and the same source. Change the pick later with:
+
+```sh
+salash sources                       # your sources, * = synced in this folder
+salash sources add owner/repo 3      # by repo or its GitHub URL, Jira URL, or number from the list
+salash sources remove owner/repo     # its notes stay in the vault
+```
+
+A folder entry names the source by `repo` / `url` and gets everything else from your entry:
+`path`, `token_env`, Jira's `email`, and `search` / `jql` / `id_prefix` / `worktrees` unless it
+sets its own. A folder without sources shows its vault's notes and says how to add one.
+
+```toml
+# ~/code/backend/.salash/config.toml
+vault = "~/Documents/Obsidian"
+[[github]]
+repo = "owner/backend"
+search = "label:backend"
+[[jira]]
+url = "https://yourcompany.atlassian.net"
+jql = "project = BE AND assignee = currentUser()"
+```
+
+A folder's `.salash/config.toml` can also override `vault`, `notes_dir`, `prefix`,
+`local_prefix`, `bell`, `mouse` and `worktrees`. Commands, repo paths, `token_env`, Jira's
+`email` and the sources themselves only come from your own config, because a repo you clone can
+ship a `.salash/config.toml`: a source it names that your config doesn't list never syncs, and
+no token is looked up for it. salash ignores the rest and says so when it starts.
+
+### Your config
 
 ```toml
 vault = "~/Documents/Obsidian"
@@ -428,7 +471,8 @@ with fewer checks than its own. Run `salash tab new --mode …` yourself for the
 salash [folder]        # start the folder's salash in the background and attach
 salash --attach [folder]  # attach to the folder's running salash
 salash new <title>     # create a local issue note
-salash sync            # pull GitHub/Jira issues and create missing notes in todo/
+salash sync            # pull this folder's GitHub/Jira issues and create missing notes in todo/
+salash sources [add|remove <source>…]  # which of your sources this folder syncs
 salash token set|get|delete <source>   # keep a source's token in the OS keychain
 salash token status    # where each source's token comes from
 salash list
@@ -470,6 +514,7 @@ src/
   worktree.rs   per-issue git worktrees
   state.rs      persisted tabs, session IDs and saved screens
   transcript.rs conversation text from Claude's transcript, for saved screens
+  sources.rs    `salash sources` and the first-start prompt: which sources a folder syncs
   token.rs      GitHub/Jira tokens from env vars and the OS keychain, `salash token`
 ```
 

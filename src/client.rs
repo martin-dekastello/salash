@@ -36,8 +36,9 @@ pub fn start(inst: &Instance) -> Result<()> {
             f = inst.folder.display()
         );
     }
+    let first_run = crate::sources::init_if_new(inst)?;
     inst.ensure_dir()?;
-    crate::server::spawn(inst)?;
+    crate::server::spawn(inst, first_run)?;
     let start = Instant::now();
     let conn = loop {
         match connect(inst) {

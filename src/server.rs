@@ -156,14 +156,18 @@ struct Server {
     watched: Instant,
 }
 
-/// `salash server <folder>`: run in the background until quit.
-pub fn run(inst: Instance) -> Result<()> {
+/// `salash server <folder>`: run in the background until quit. `first_run`:
+/// the client's first-start prompt already created your config ([#43]).
+///
+/// [#43]: https://github.com/martin-dekastello/salash/issues/43
+pub fn run(inst: Instance, first_run: bool) -> Result<()> {
     inst.ensure_dir()?;
     let _lock = lock(&inst)?;
     let global = config::global_data_dir();
     let moved = instance::migrate(&global, &inst.dir)?;
     config::set_data_dir(inst.dir.clone());
-    let (cfg, first_run) = Config::load_for(Some(&inst.dir))?;
+    let (cfg, created) = Config::load_for(Some(&inst.dir))?;
+    let first_run = first_run || created;
     // No terminal to ask here, so "auto" falls back to dark.
     crate::theme::init(&cfg.theme);
     let mouse = cfg.mouse;
@@ -173,9 +177,11 @@ pub fn run(inst: Instance) -> Result<()> {
     }
     if !app.cfg.ignored.is_empty() {
         app.flash(format!(
-            "Ignored in .salash/config.toml: {} (only your own config may set these)",
+            "Ignored in .salash/config.toml: {} (only your own config may set or list these)",
             app.cfg.ignored.join(", ")
         ));
+    } else if !first_run && crate::providers::from_config(&app.cfg).is_empty() {
+        app.flash(app.cfg.no_sources_hint());
     }
     let rx = listen(&inst)?;
     let stop = stop_on_signal();
@@ -516,7 +522,7 @@ impl Server {
 
 /// Start the folder's server as a background process that outlives this
 /// terminal. A fresh exec rather than a fork, which isn't safe once threads exist.
-pub fn spawn(inst: &Instance) -> Result<()> {
+pub fn spawn(inst: &Instance, first_run: bool) -> Result<()> {
     use std::process::{Command, Stdio};
     // Appended to: when two starts race, the one that loses mustn't wipe the
     // log of the one that won.
@@ -526,9 +532,11 @@ pub fn spawn(inst: &Instance) -> Result<()> {
         .open(inst.log_path())
         .with_context(|| format!("opening {}", inst.log_path().display()))?;
     let mut cmd = Command::new(std::env::current_exe()?);
-    cmd.arg("server")
-        .arg(&inst.folder)
-        .current_dir(&inst.folder)
+    cmd.arg("server").arg(&inst.folder);
+    if first_run {
+        cmd.arg("--first-run");
+    }
+    cmd.current_dir(&inst.folder)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(log);

@@ -13,6 +13,7 @@ mod proto;
 mod providers;
 mod query;
 mod server;
+mod sources;
 mod state;
 mod status;
 mod term;
@@ -50,7 +51,12 @@ struct Cli {
 enum Cmd {
     /// Run a folder's salash in the foreground, without a terminal (started by `salash`).
     #[command(hide = true)]
-    Server { folder: PathBuf },
+    Server {
+        folder: PathBuf,
+        /// The client created your config just before (first-start prompt).
+        #[arg(long, hide = true)]
+        first_run: bool,
+    },
     /// Called by Claude Code hooks (reads the hook JSON on stdin).
     Hook,
     /// Add salash status hooks to ~/.claude/settings.json (only needed if inject_hooks = false).
@@ -63,6 +69,11 @@ enum Cmd {
     List,
     /// Print config, data and notes paths.
     Paths,
+    /// Pick which of your GitHub/Jira sources this folder syncs.
+    Sources {
+        #[command(subcommand)]
+        cmd: Option<sources::SourcesCmd>,
+    },
     /// Keep GitHub/Jira tokens in the OS keychain and see where each source's comes from.
     Token {
         #[command(subcommand)]
@@ -128,7 +139,7 @@ fn load_config() -> Result<config::Config> {
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.cmd {
-        Some(Cmd::Server { folder }) => server::run(Instance::new(Some(&folder))?),
+        Some(Cmd::Server { folder, first_run }) => server::run(Instance::new(Some(&folder))?, first_run),
         Some(Cmd::Hook) => {
             let _ = status::run_hook();
             Ok(())
@@ -150,7 +161,11 @@ fn main() -> Result<()> {
         Some(Cmd::Sync) => {
             let cfg = load_config()?;
             let v = vault::Vault::new(cfg.notes_root())?;
-            let rep = providers::fetch_all(&providers::from_config(&cfg));
+            let sources = providers::from_config(&cfg);
+            if sources.is_empty() {
+                bail!("{}", cfg.no_sources_hint());
+            }
+            let rep = providers::fetch_all(&sources);
             for i in &rep.fetched {
                 let (n, created) = v.create(vault::NewNote {
                     id: &i.id,
@@ -192,6 +207,13 @@ fn main() -> Result<()> {
             println!("worktrees {}", cfg.worktrees_dir.display());
             Ok(())
         }
+        Some(Cmd::Sources { cmd }) => {
+            let inst = match here() {
+                Some(i) => i,
+                None => Instance::new(None)?,
+            };
+            sources::run(cmd, &inst)
+        }
         Some(Cmd::Token { cmd }) => token::run(cmd, load_config),
         Some(Cmd::Tab { cmd: TabCmd::New { issue, kind, cwd, name, mode, prompt_file, folder } }) => {
             match folder {
@@ -220,5 +242,18 @@ fn main() -> Result<()> {
             let inst = Instance::new(cli.folder.as_deref())?;
             if cli.attach { client::attach(&inst) } else { client::start(&inst) }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_server_takes_first_run_from_the_client() {
+        let cli = Cli::try_parse_from(["salash", "server", "/x", "--first-run"]).unwrap();
+        assert!(matches!(cli.cmd, Some(Cmd::Server { first_run: true, .. })));
+        let cli = Cli::try_parse_from(["salash", "server", "/x"]).unwrap();
+        assert!(matches!(cli.cmd, Some(Cmd::Server { first_run: false, .. })));
     }
 }
