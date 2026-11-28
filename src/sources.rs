@@ -142,7 +142,8 @@ fn matching(folder: &Path, cfg: &Config, remotes: &[String]) -> Vec<Source> {
 }
 
 /// An argument to `add` / `remove`: a number from the list, `github:`/`jira:`
-/// prefixed or bare. `https://…` is Jira, anything else a GitHub repo.
+/// prefixed or bare. A GitHub URL is its repo, any other `https://…` Jira,
+/// anything else a GitHub repo.
 fn parse_arg(arg: &str, catalog: &[Source]) -> Result<(Kind, String)> {
     if let Ok(n) = arg.parse::<usize>() {
         return match n.checked_sub(1).and_then(|i| catalog.get(i)) {
@@ -157,6 +158,9 @@ fn parse_arg(arg: &str, catalog: &[Source]) -> Result<(Kind, String)> {
         return Ok((Kind::Jira, u.to_string()));
     }
     if arg.starts_with("https://") || arg.starts_with("http://") {
+        if let Some(r) = github_repo(arg) {
+            return Ok((Kind::Github, r));
+        }
         return Ok((Kind::Jira, arg.to_string()));
     }
     if arg.split('/').count() != 2 || arg.split('/').any(str::is_empty) {
@@ -234,10 +238,22 @@ fn unpick(doc: &mut toml_edit::DocumentMut, kind: Kind, name: &str) -> bool {
 }
 
 /// Add a GitHub repo to your own config, with this folder as its clone.
-/// Appended as text, so your comments stay.
 fn catalog_github(repo: &str, folder: &Path) -> Result<()> {
-    let path = config::config_path();
-    let mut text = std::fs::read_to_string(&path).unwrap_or_default();
+    catalog_github_at(&config::config_path(), repo, folder)
+}
+
+/// Appended as text, so your comments stay. Only onto a config that parses
+/// and has no `github = …` of another shape, which a `[[github]]` would break.
+fn catalog_github_at(path: &Path, repo: &str, folder: &Path) -> Result<()> {
+    let mut text = match std::fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(e).with_context(|| format!("reading {}", path.display())),
+    };
+    let doc: toml_edit::DocumentMut = text.parse().with_context(|| format!("parsing {}", path.display()))?;
+    if doc.get("github").is_some_and(|g| !g.is_array_of_tables()) {
+        bail!("`github` in {} isn't a list of [[github]] tables: add [[github]] repo = \"{repo}\" there by hand", path.display());
+    }
     if !text.is_empty() && !text.ends_with('\n') {
         text.push('\n');
     }
@@ -247,7 +263,7 @@ fn catalog_github(repo: &str, folder: &Path) -> Result<()> {
         quote(repo).trim(),
         quote(&folder.to_string_lossy()).trim()
     ));
-    std::fs::write(&path, text).with_context(|| format!("writing {}", path.display()))
+    std::fs::write(path, text).with_context(|| format!("writing {}", path.display()))
 }
 
 fn ask(input: &mut impl BufRead, out: &mut impl Write, q: &str) -> Result<Option<String>> {
@@ -261,9 +277,11 @@ fn ask(input: &mut impl BufRead, out: &mut impl Write, q: &str) -> Result<Option
     Ok(Some(line.trim().to_string()))
 }
 
+/// Enter takes the default; input ending (ctrl-d) is always no.
 fn yes(answer: Option<&str>, default: bool) -> bool {
     match answer.map(str::to_ascii_lowercase).as_deref() {
-        None | Some("") => default,
+        None => false,
+        Some("") => default,
         Some(a) => a.starts_with('y'),
     }
 }
@@ -292,42 +310,12 @@ pub fn run(cmd: Option<SourcesCmd>, inst: &Instance) -> Result<()> {
             }
         }
         SourcesCmd::Add { sources } => {
-            let mut doc = read_doc(&path)?;
             let stdin = std::io::stdin();
-            // Every argument must name a source before anything is written.
-            let args = sources.iter().map(|a| parse_arg(a, &cat)).collect::<Result<Vec<_>>>()?;
-            for (kind, name) in args {
-                let known = cat.iter().find(|s| s.same(kind, &name)).cloned();
-                let s = match (known, kind) {
-                    (Some(s), _) => s,
-                    (None, Kind::Jira) => bail!(
-                        "{name} isn't in {}: add a [[jira]] with url and email there first",
-                        config::shorten(&config::config_path())
-                    ),
-                    (None, Kind::Github) => {
-                        let q = format!("{name} isn't in your config. Add it there, with this folder as its clone? [y/N] ");
-                        let answer = if interactive() { ask(&mut stdin.lock(), &mut std::io::stdout(), &q)? } else { None };
-                        if !yes(answer.as_deref(), false) {
-                            bail!(
-                                "{name} isn't in {}: add [[github]] repo = \"{name}\" there first",
-                                config::shorten(&config::config_path())
-                            );
-                        }
-                        catalog_github(&name, &inst.folder)?;
-                        println!("Added {name} to {}", config::shorten(&config::config_path()));
-                        Source { kind, name }
-                    }
-                };
-                if pick(&mut doc, s.kind, &s.name)? {
-                    println!("+ {s}");
-                } else {
-                    println!("  {s} (already synced)");
-                }
-            }
-            write_doc(inst, &doc)?;
-            println!("Wrote {}; a running salash picks it up when it starts again", config::shorten(&path));
+            let mut input: Box<dyn BufRead> = if interactive() { Box::new(stdin.lock()) } else { Box::new(std::io::empty()) };
+            add(inst, &cat, &sources, &mut input, &mut std::io::stdout(), &mut |repo| catalog_github(repo, &inst.folder))?;
         }
         SourcesCmd::Remove { sources } => {
+            println!("Changing the sources of {}", config::shorten(&inst.folder));
             if !path.exists() {
                 println!("{} syncs nothing yet", config::shorten(&inst.folder));
                 return Ok(());
@@ -348,14 +336,69 @@ pub fn run(cmd: Option<SourcesCmd>, inst: &Instance) -> Result<()> {
     Ok(())
 }
 
+/// `salash sources add`: every argument is resolved, and every repo missing
+/// from your config asked about (once each), before anything is written.
+fn add(
+    inst: &Instance,
+    cat: &[Source],
+    args: &[String],
+    input: &mut impl BufRead,
+    out: &mut impl Write,
+    add_to_own: &mut dyn FnMut(&str) -> Result<()>,
+) -> Result<()> {
+    writeln!(out, "Changing the sources of {}", config::shorten(&inst.folder))?;
+    let path = folder_config(inst);
+    let mut doc = read_doc(&path)?;
+    let own = config::shorten(&config::config_path());
+    let mut picks: Vec<Source> = vec![];
+    let mut new: Vec<String> = vec![];
+    for (kind, name) in args.iter().map(|a| parse_arg(a, cat)).collect::<Result<Vec<_>>>()? {
+        let s = match cat.iter().find(|s| s.same(kind, &name)) {
+            Some(s) => s.clone(),
+            None if kind == Kind::Jira => bail!("{name} isn't in {own}: add a [[jira]] with url and email there first"),
+            None => {
+                if !new.iter().any(|n| same_repo(n, &name)) {
+                    new.push(name.clone());
+                }
+                Source { kind, name }
+            }
+        };
+        if !picks.iter().any(|p| p.same(s.kind, &s.name)) {
+            picks.push(s);
+        }
+    }
+    for name in &new {
+        let q = format!("{name} isn't in your config. Add it there, with this folder as its clone? [y/N] ");
+        if !yes(ask(input, out, &q)?.as_deref(), false) {
+            bail!("{name} isn't in {own}: add [[github]] repo = \"{name}\" there first");
+        }
+    }
+    for name in &new {
+        add_to_own(name)?;
+        writeln!(out, "Added {name} to {own}")?;
+    }
+    for s in &picks {
+        if pick(&mut doc, s.kind, &s.name)? {
+            writeln!(out, "+ {s}")?;
+        } else {
+            writeln!(out, "  {s} (already synced)")?;
+        }
+    }
+    write_doc(inst, &doc)?;
+    writeln!(out, "Wrote {}; a running salash picks it up when it starts again", config::shorten(&path))?;
+    Ok(())
+}
+
 // ---------- first start in a folder ----------
 
 /// On the first `salash` in a folder (no `.salash/config.toml` yet) and in a
 /// terminal, ask which vault it uses and which sources it syncs, and write
 /// the answer. Several folders can pick the same vault and the same source.
-pub fn init_if_new(inst: &Instance) -> Result<()> {
+/// True if this created your own config: the server can't see that any more,
+/// so the client passes it on.
+pub fn init_if_new(inst: &Instance) -> Result<bool> {
     if folder_config(inst).exists() || !interactive() {
-        return Ok(());
+        return Ok(false);
     }
     let created = !config::config_path().exists();
     let cfg = Config::load_for(Some(&inst.dir))?.0;
@@ -364,7 +407,8 @@ pub fn init_if_new(inst: &Instance) -> Result<()> {
         writeln!(out, "Created {}: your settings and sources go there", config::shorten(&config::config_path()))?;
     }
     let remotes = remotes(&inst.folder);
-    init(inst, &cfg, &remotes, &mut std::io::stdin().lock(), &mut out, &mut |repo| catalog_github(repo, &inst.folder))
+    init(inst, &cfg, &remotes, &mut std::io::stdin().lock(), &mut out, &mut |repo| catalog_github(repo, &inst.folder))?;
+    Ok(created)
 }
 
 /// The prompt behind `init_if_new`, with its input, output and the write to
@@ -529,6 +573,8 @@ mod tests {
         assert_eq!(parse_arg("github:a/two", &cat).unwrap(), (Kind::Github, "a/two".into()));
         assert_eq!(parse_arg("https://x.net", &cat).unwrap().0, Kind::Jira);
         assert_eq!(parse_arg("jira:https://x.net", &cat).unwrap().0, Kind::Jira);
+        assert_eq!(parse_arg("https://github.com/o/r", &cat).unwrap(), (Kind::Github, "o/r".into()));
+        assert_eq!(parse_arg("https://github.com/o/r.git", &cat).unwrap(), (Kind::Github, "o/r".into()));
         for bad in ["nonsense", "a/", "/b", "a/b/c"] {
             assert!(parse_arg(bad, &cat).is_err(), "{bad}");
         }
@@ -651,6 +697,84 @@ mod tests {
         assert!(inst.dir.join(".gitignore").exists(), "the .salash dir ignores itself");
         let text = std::fs::read_to_string(folder_config(&inst)).unwrap();
         assert!(text.starts_with(HEADER), "header on top: {text}");
+        std::fs::remove_dir_all(&inst.folder).ok();
+    }
+
+    /// `add` with `answers` as input; what it printed, the repos it added to
+    /// your config, and whether it succeeded.
+    fn run_add(inst: &Instance, cat: &[Source], args: &[&str], answers: &str) -> (String, Vec<String>, bool) {
+        let args: Vec<String> = args.iter().map(|a| a.to_string()).collect();
+        let mut out = vec![];
+        let mut added = vec![];
+        let ok = add(inst, cat, &args, &mut answers.as_bytes(), &mut out, &mut |r| {
+            added.push(r.to_string());
+            Ok(())
+        })
+        .is_ok();
+        (String::from_utf8(out).unwrap(), added, ok)
+    }
+
+    fn one_of_each() -> Vec<Source> {
+        vec![Source { kind: Kind::Github, name: "a/one".into() }, Source { kind: Kind::Jira, name: "https://co.atlassian.net".into() }]
+    }
+
+    #[test]
+    fn add_asks_once_per_new_repo_and_adds_it_once() {
+        let inst = temp();
+        let (out, added, ok) = run_add(&inst, &one_of_each(), &["me/new", "Me/New", "1", "a/one"], "y\n");
+        assert!(ok, "{out}");
+        assert_eq!(out.matches("isn't in your config").count(), 1, "{out}");
+        assert_eq!(added, ["me/new"]);
+        assert_eq!(names(&written(&inst), "github", "repo"), ["me/new", "a/one"]);
+        std::fs::remove_dir_all(&inst.folder).ok();
+    }
+
+    #[test]
+    fn add_writes_nothing_unless_every_argument_resolves() {
+        let cat = one_of_each();
+        // An unknown Jira after a new repo: nothing asked, nothing written.
+        let inst = temp();
+        let (out, added, ok) = run_add(&inst, &cat, &["me/new", "https://unknown.example"], "y\n");
+        assert!(!ok && added.is_empty(), "{out}");
+        assert!(!out.contains("isn't in your config"), "{out}");
+        assert!(!folder_config(&inst).exists());
+        // A "no", or input ending, for one of two new repos: neither is added.
+        for answers in ["y\nn\n", "y\n"] {
+            let (out, added, ok) = run_add(&inst, &cat, &["1", "me/new", "me/other"], answers);
+            assert!(!ok && added.is_empty(), "{answers:?}: {out}");
+            assert!(!folder_config(&inst).exists(), "{answers:?}");
+        }
+        std::fs::remove_dir_all(&inst.folder).ok();
+    }
+
+    #[test]
+    fn eof_at_add_it_there_is_no() {
+        let inst = temp();
+        let c = cfg(vec![gh("a/one", None)], vec![]);
+        // Vault takes its default, then input ends at the offer for me/new.
+        let (_, added) = run_init(&inst, &c, &["me/new"], "\n");
+        assert!(added.is_empty());
+        std::fs::remove_dir_all(&inst.folder).ok();
+    }
+
+    #[test]
+    fn catalog_github_appends_only_to_a_config_it_wont_break() {
+        let inst = temp();
+        let own = inst.folder.join("own.toml");
+        catalog_github_at(&own, "a/one", Path::new("/code/one")).unwrap();
+        std::fs::write(&own, format!("# mine\nvault = \"/v\"{}", std::fs::read_to_string(&own).unwrap())).unwrap();
+        catalog_github_at(&own, "a/two", Path::new("/code/two")).unwrap();
+        let text = std::fs::read_to_string(&own).unwrap();
+        assert!(text.starts_with("# mine"), "{text}");
+        let t: toml::Table = toml::from_str(&text).unwrap();
+        assert_eq!(names(&t, "github", "repo"), ["a/one", "a/two"]);
+
+        let inline = "github = [{ repo = \"a/one\" }]\n";
+        std::fs::write(&own, inline).unwrap();
+        assert!(catalog_github_at(&own, "a/two", Path::new("/x")).is_err());
+        std::fs::write(&own, "vault = \n").unwrap();
+        assert!(catalog_github_at(&own, "a/two", Path::new("/x")).is_err(), "doesn't parse");
+        assert_eq!(std::fs::read_to_string(&own).unwrap(), "vault = \n", "left alone");
         std::fs::remove_dir_all(&inst.folder).ok();
     }
 }

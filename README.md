@@ -138,7 +138,7 @@ Several folders can pick the same vault and the same source. Change the pick lat
 
 ```sh
 salash sources                       # your sources, * = synced in this folder
-salash sources add owner/repo 3      # by repo, Jira URL, or number from the list
+salash sources add owner/repo 3      # by repo or its GitHub URL, Jira URL, or number from the list
 salash sources remove owner/repo     # its notes stay in the vault
 ```
 
