@@ -287,9 +287,14 @@ impl App {
 
     pub(super) fn rename_tab(&mut self, name: String) {
         let Some(id) = self.selected.clone() else { return };
-        let name = name.trim().to_string();
+        let mut name = name.trim().to_string();
         let rt = self.rt_for(&id);
         if let Some(t) = rt.tabs.get_mut(rt.active) {
+            // The prefilled default confirmed as is (`,` Enter on `shell`)
+            // clears the name, or it would hide commands for good.
+            if name == super::spawn::default_name(t.st.kind) {
+                name.clear();
+            }
             t.st.custom_name = !name.is_empty();
             if !name.is_empty() {
                 t.st.name = name;

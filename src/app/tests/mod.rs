@@ -156,7 +156,9 @@ pub(super) fn fresh(kind: TabKind, session: Option<&str>, cwd: Option<&str>) -> 
 /// A tab of `kind` whose pane runs `sleep` with no command in front of it;
 /// dropping the pane kills it.
 pub(super) fn live(kind: TabKind, dir: &Path) -> Tab {
-    let argv = ["sh".to_string(), "-c".to_string(), "sleep 30".to_string()];
+    // `; true` keeps sh from exec'ing into sleep, so a shell tab is idle at a
+    // "prompt" rather than an exec'd program.
+    let argv = ["sh".to_string(), "-c".to_string(), "sleep 30; true".to_string()];
     let mut t = unstarted_tab();
     t.pane = Some(Pane::spawn(&argv, dir, &[], 5, 40).unwrap());
     t.st.id = uuid::Uuid::new_v4().to_string();

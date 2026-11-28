@@ -270,6 +270,9 @@ impl App {
         match result {
             Ok(p) => {
                 tab.pane = Some(p);
+                if st.kind == TabKind::Shell {
+                    tab.cmd = super::types::CmdLabel::for_shell(argv.first().map_or("", String::as_str));
+                }
                 tab.status = if st.kind == TabKind::Claude { ClaudeStatus::Starting } else { ClaudeStatus::Idle };
                 tab.status_ts = now_ms();
                 state::remove_snapshot(&st.id);

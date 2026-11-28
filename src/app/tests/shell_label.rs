@@ -1,6 +1,6 @@
 //! Shell tabs show their foreground command, settled for a second (#47).
 
-use super::super::types::CmdLabel;
+use super::super::types::{is_shell, reading, CmdLabel, CmdState};
 use super::*;
 
 const MS: fn(u64) -> Duration = Duration::from_millis;
@@ -99,30 +99,48 @@ fn exec_shows_the_new_name_after_a_second() {
     assert_eq!(l.label(), Some("make"));
     l.observe((100, Some("bash".into())), None, t0 + MS(3250));
     l.observe((100, Some("bash".into())), None, t0 + MS(4250));
-    assert_eq!(l.label(), Some("bash"), "at the exec'd shell's prompt");
+    assert_eq!(l.label(), None, "an exec'd shell at its prompt is idle");
 }
 
 #[test]
-fn exec_into_the_same_shell_stays_idle() {
-    // `exec zsh` inside zsh: the own process keeps its name.
-    let (l, _) = fed(&[(0, None), (1000, None), (2000, None)]);
-    assert_eq!(l.label(), None);
-}
-
-#[test]
-fn no_exec_detection_without_a_readable_baseline() {
+fn a_wrapper_that_execs_a_shell_stays_idle() {
+    // `sh -c 'cd x && exec zsh'`, or a .bashrc ending in `exec fish`: the own
+    // name changes before any command runs, and it's still a shell.
     let t0 = Instant::now();
     let mut l = CmdLabel::default();
-    l.observe((100, None), None, t0);
-    l.observe((100, None), None, t0 + MS(250));
-    // The baseline is the first readable name, so a name showing up later is it.
-    l.observe((100, Some("vim".into())), None, t0 + MS(500));
-    l.observe((100, Some("vim".into())), None, t0 + MS(3000));
+    l.observe((100, Some("sh".into())), None, t0);
+    for ms in (250..=3000).step_by(250) {
+        l.observe((100, Some("zsh".into())), None, t0 + MS(ms));
+        assert_eq!(l.label(), None, "{ms}ms");
+    }
+}
+
+#[test]
+fn a_login_shell_and_the_configured_shell_count_as_shells() {
+    assert!(is_shell("-zsh", None));
+    assert!(!is_shell("vim", None));
+    assert!(is_shell("vim", Some("vim")), "shell_command = [\"vim\"] is the tab's shell");
+    let t0 = Instant::now();
+    let mut l = CmdLabel::for_shell("/usr/bin/vim");
+    l.observe((100, Some("vim".into())), None, t0);
+    l.observe((100, Some("vim".into())), None, t0 + MS(2000));
     assert_eq!(l.label(), None);
 }
 
 #[test]
-fn reset_waits_a_full_second_and_keeps_the_exec_baseline() {
+fn an_unreadable_own_name_counts_as_idle() {
+    assert_eq!(reading((100, None), None, None), CmdState::Idle);
+}
+
+#[test]
+fn an_unreadable_job_still_shows_an_exec_d_program() {
+    // `sudo …` under an exec'd vim, where the job's name can't be read.
+    assert_eq!(reading((100, Some("vim".into())), Some((200, None)), None), CmdState::Job(100, "vim".into()));
+    assert_eq!(reading(sh(), Some((200, None)), None), CmdState::Idle);
+}
+
+#[test]
+fn reset_waits_a_full_second() {
     let (mut l, t0) = fed(&[(0, job(200, "vim")), (1000, job(200, "vim"))]);
     assert_eq!(l.label(), Some("vim"));
     l.reset(t0 + MS(1100));
@@ -132,7 +150,6 @@ fn reset_waits_a_full_second_and_keeps_the_exec_baseline() {
     assert_eq!(l.label(), None, "900ms after the reset");
     l.observe(sh(), job(200, "vim"), t0 + MS(2200));
     assert_eq!(l.label(), Some("vim"));
-    assert_eq!(l.own_name.as_deref(), Some("zsh"));
 }
 
 // ---------- the tab ----------
@@ -226,6 +243,24 @@ fn clearing_a_claude_rename_keeps_the_name() {
     app.rename_tab(String::new());
     let t = tab0(&mut app);
     assert_eq!((t.st.name.as_str(), t.st.custom_name), ("fix login", false));
+}
+
+#[test]
+fn renaming_a_shell_to_shell_clears_the_name() {
+    let mut app = shell_app(TabKind::Shell, "shell");
+    app.rename_tab("shell".into());
+    assert!(!tab0(&mut app).st.custom_name, "`,` Enter on the prefilled default");
+}
+
+#[test]
+fn an_exec_d_program_counts_as_busy() {
+    // The tab's own process is `sleep`: not a shell, so it's an exec'd program.
+    let mut app = shell_app(TabKind::Shell, "shell");
+    let own = tab0(&mut app).pane.as_ref().unwrap().child_pid().unwrap();
+    wait(|| term::process_name(own).as_deref() == Some("sleep"));
+    assert_eq!(tab0(&mut app).busy_label().as_deref(), Some("shell: sleep"));
+    tab0(&mut app).cmd = CmdLabel::for_shell("sleep");
+    assert_eq!(tab0(&mut app).busy_label(), None, "the configured shell at its prompt");
 }
 
 #[test]
