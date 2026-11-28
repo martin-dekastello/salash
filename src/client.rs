@@ -36,6 +36,7 @@ pub fn start(inst: &Instance) -> Result<()> {
             f = inst.folder.display()
         );
     }
+    crate::sources::init_if_new(inst)?;
     inst.ensure_dir()?;
     crate::server::spawn(inst)?;
     let start = Instant::now();

@@ -2530,6 +2530,7 @@ dependencies = [
  "terminal-light",
  "tokio",
  "toml",
+ "toml_edit",
  "tui-term",
  "ureq",
  "urlencoding",
@@ -3169,6 +3170,7 @@ dependencies = [
  "indexmap",
  "toml_datetime",
  "toml_parser",
+ "toml_writer",
  "winnow",
 ]
 
