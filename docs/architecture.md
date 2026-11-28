@@ -31,7 +31,7 @@ on purpose: two servers for one folder would fight over its state and its tabs. 
 ```
 <folder>/.salash/
   .gitignore         "*": the folder ignores itself, so a repo's own .gitignore stays untouched
-  config.toml        optional; overrides some keys of ~/.config/salash/config.toml
+  config.toml        which of your sources sync here, and overrides of some keys (#43)
   salash.sock        the socket clients connect to
   server.lock        locked by the running server; holds its pid
   server.log         the server's stderr
@@ -46,16 +46,43 @@ on purpose: two servers for one folder would fight over its state and its tabs. 
 ```
 
 The folder's `config.toml` is merged over the global config. Tables merge key by key, and
-anything else replaces the global value, arrays included: a folder that lists `[[github]]`
-sources gets only those, not the global ones as well.
+anything else replaces the global value.
 
-Only `vault`, `notes_dir`, `prefix`, `local_prefix`, `bell`, `mouse` and `[[github]]` (minus
-`path` and `token_env`) are taken from it (`FOLDER_KEYS` in `src/config.rs`). A repo can commit
+Only `vault`, `notes_dir`, `prefix`, `local_prefix`, `bell`, `mouse`, `worktrees`, `[[github]]`
+and `[[jira]]` are taken from it (`FOLDER_KEYS` in `src/config.rs`). A repo can commit
 `.salash/config.toml` with `git add -f`, and the `.gitignore` salash writes doesn't stop a clone
 from bringing it along. So nothing that runs a command (`*_command`), points at a repository
 (`local_repo`, `path`: creating a worktree runs that repository's hooks) or sends a credential
-(`[[jira]]`, and `token_env`, which picks the env var whose secret is sent) can come from the
+(`token_env`, which picks the env var whose secret is sent, and Jira's `email`) can come from the
 folder. The server logs the keys it ignored and flashes them.
+
+### Your sources are a catalog, a folder picks
+
+Decided in [#43](https://github.com/martin-dekastello/salash/issues/43). The `[[github]]` and
+`[[jira]]` in your own config used to sync into every folder's salash, so every folder got
+every source's issues. Now they are only a catalog. A folder syncs only the sources its
+`.salash/config.toml` names, and there is no "sync everything" fallback:
+
+- **No folder config, or none of its sources, means no sync.** Outside any folder, `salash
+  sync` syncs nothing either. The sidebar still shows everything in the vault (several folders
+  can share one vault). Notes already there from other sources stay, and `repo_path_for` finds
+  their repo through the catalog (`catalog_github`/`catalog_jira`), not only the folder's picks.
+- **A folder entry only selects.** It is matched to your entry by `repo` (ignoring case) or
+  `url` (ignoring a trailing `/`) and becomes your entry with the folder's own keys on top
+  (`select_sources`). So `repo = "x"` alone keeps your `id_prefix`, and the note ids don't change.
+- **A source your config doesn't list is dropped and reported, never synced.** Otherwise a
+  cloned repo could make salash send `$GH_TOKEN` / `$JIRA_API_TOKEN` (or the keychain token) to
+  a source you never chose. That is also why the folder can't add sources to the catalog:
+  only you can, by hand, or by saying yes in a terminal prompt (`salash sources add`, first start).
+- **Migration is a prompt, not a flag.** The first `salash` in a folder without a config asks,
+  in the terminal before the server starts, which vault and sources it uses
+  (`sources::init_if_new`). The folder's own repo is preselected from `git remote` or the
+  sources' `path`. The answer is written even when it is "none", so the question comes once.
+  Without a terminal (`--attach`, scripts) nothing is asked, and the server flashes how to add a
+  source. A global `sync_everywhere` switch was rejected: it would have kept the old leak for
+  every existing config.
+- `salash token status` and `token set`'s "not a source" note look at the catalog, because a
+  token matters wherever any folder picks the source.
 
 Every tab gets `SALASH_DATA=<folder>/.salash`. That is how `salash hook` and `salash tab new`
 running inside a tab reach their own salash and not another folder's. Outside a tab, `salash
