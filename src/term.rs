@@ -725,6 +725,21 @@ mod tests {
     }
 
     #[test]
+    fn exec_renames_the_tabs_own_process() {
+        let argv = ["sh".to_string(), "-i".to_string()];
+        let env = [("PS1".to_string(), "prompt> ".to_string()), ("ENV".to_string(), "/dev/null".to_string())];
+        let mut pane = Pane::spawn(&argv, &std::env::temp_dir(), &env, 10, 60).unwrap();
+        wait_until(|| pane.parser.lock().unwrap().screen().contents().contains("prompt>"));
+        let own = pane.child_pid().unwrap();
+        // `sh` is bash on macOS: any readable name other than sleep's will do.
+        let base = process_name(own).expect("the tab's own name is readable");
+        assert_ne!(base, "sleep");
+        pane.write(b"exec sleep 30\r");
+        wait_until(|| process_name(own).as_deref() == Some("sleep"));
+        assert_eq!(pane.foreground_pid(), None, "an exec'd program is still the tab's own group");
+    }
+
+    #[test]
     fn an_exited_pane_has_no_foreground_command() {
         let argv = ["sh".to_string(), "-c".to_string(), "true".to_string()];
         let mut pane = Pane::spawn(&argv, &std::env::temp_dir(), &[], 5, 40).unwrap();

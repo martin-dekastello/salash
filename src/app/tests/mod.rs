@@ -5,6 +5,7 @@ mod render;
 mod resume;
 mod retire;
 mod seen;
+mod shell_label;
 mod sort;
 mod workdir;
 
