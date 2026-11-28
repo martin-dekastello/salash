@@ -48,6 +48,10 @@ To record the demo again, run `demo/record.sh` (see [demo/](demo/)).
   tab: its process stops and its RAM is freed, but you can still scroll its saved screen,
   and `⏎` continues it with `claude --resume <session>`. A Claude tab that was running when
   you quit salash ends up the same way. Closing one with `x` keeps it too: `R` reopens it.
+- **Shell tabs show the running command**, as iTerm2 and tmux do: `$ 1:vim` while vim runs,
+  `$ 1:shell` again back at the prompt. It's the foreground process's name, shown once it has
+  run for a second, and only on the tab bar (it's never saved as the tab's name). A renamed
+  shell tab keeps its name. See [docs/tabs.md](docs/tabs.md).
 - **Tabs close when their process exits**: quit Claude, `exit` a shell or close the note's
   editor and the tab goes away. A Claude session that exits can still be brought back with
   `R`. Only a Claude that fails to start stays open, so you can read why.
@@ -450,7 +454,7 @@ src/
   instance.rs   one salash per folder: .salash, socket, lock, moving old state
   app/          the App: state, input routing, tab lifecycle, status polling
     mod.rs      App struct, modes and focus, construction, shared helpers
-    types.rs    Tab and an issue's tabs (IssueRt), status rollup
+    types.rs    Tab and an issue's tabs (IssueRt), status rollup, shell command label
     issues.rs   the issue list: filter, sort, select, stage moves, retiring tabs, sync
     spawn.rs    starting panes: claude argv, work dirs, worktrees, new tabs
     tabs.rs     tab actions: open/switch/close/reopen/suspend/resume, API requests

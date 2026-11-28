@@ -11,7 +11,7 @@ fn done_stops_idle_tabs_and_keeps_resume_commands_in_the_note() {
     let suspended = fresh(TabKind::Claude, Some(S1), Some("/work/my repo"));
     let no_session = fresh(TabKind::Claude, None, None);
     let shell = live(TabKind::Shell, &vault.0);
-    let shell_pid = shell.pane.as_ref().unwrap().pid().unwrap();
+    let shell_pid = shell.pane.as_ref().unwrap().child_pid().unwrap();
     let ids: Vec<String> = [&suspended, &no_session, &shell].iter().map(|t| t.st.id.clone()).collect();
     with_tabs(&mut app, "a", vec![suspended, no_session, shell], 2);
     let closed_id = uuid::Uuid::new_v4().to_string();
@@ -39,7 +39,7 @@ fn done_stops_idle_tabs_and_keeps_resume_commands_in_the_note() {
     assert_eq!(saved.worktree.as_deref(), Some(Path::new("/wt/a")), "the worktree stays");
     assert!(!state::snapshot_path(&ids[0]).exists() && !state::snapshot_path(&closed_id).exists());
     // The shell is gone: kill(0) on a reaped pid fails.
-    assert_ne!(unsafe { libc::kill(shell_pid as i32, 0) }, 0, "shell still running");
+    assert_ne!(unsafe { libc::kill(shell_pid, 0) }, 0, "shell still running");
 
     let text = note_text(&app, "a");
     assert!(text.contains(&format!(" · stopped · claude · `cd '/work/my repo' && claude --resume {S1}`")), "{text}");

@@ -308,7 +308,7 @@ fn draw_tabbar(app: &mut App, f: &mut Frame, area: Rect) {
         } else {
             colors().fg_tab
         };
-        let label = truncate(&format!("{}:{}", i + 1, t.st.name), max_w.saturating_sub(6));
+        let label = truncate(&format!("{}:{}", i + 1, t.shown_name()), max_w.saturating_sub(6));
         let text_style = Style::new().fg(fg).bg(bg).add_modifier(if marked { Modifier::BOLD } else { Modifier::empty() });
         let marker = if marked && i > 0 { "▌" } else { " " };
         let parts = [

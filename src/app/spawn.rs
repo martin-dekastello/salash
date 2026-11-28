@@ -270,6 +270,9 @@ impl App {
         match result {
             Ok(p) => {
                 tab.pane = Some(p);
+                if st.kind == TabKind::Shell {
+                    tab.cmd = super::types::CmdLabel::for_shell(argv.first().map_or("", String::as_str));
+                }
                 tab.status = if st.kind == TabKind::Claude { ClaudeStatus::Starting } else { ClaudeStatus::Idle };
                 tab.status_ts = now_ms();
                 state::remove_snapshot(&st.id);
@@ -312,11 +315,7 @@ impl App {
         first_args: Vec<String>,
         activate: bool,
     ) -> String {
-        let default = match kind {
-            TabKind::Claude => "claude",
-            TabKind::Shell => "shell",
-            TabKind::Notes => "notes",
-        };
+        let default = default_name(kind);
         let tab_id = uuid::Uuid::new_v4().to_string();
         let mut tab = Tab::new(TabState {
             id: tab_id.clone(),
@@ -336,5 +335,14 @@ impl App {
         self.persist(issue);
         self.spawn_pane(issue, idx);
         tab_id
+    }
+}
+
+/// A new tab's name, and what clearing a shell or note tab's rename goes back to.
+pub(super) fn default_name(kind: TabKind) -> &'static str {
+    match kind {
+        TabKind::Claude => "claude",
+        TabKind::Shell => "shell",
+        TabKind::Notes => "notes",
     }
 }

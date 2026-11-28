@@ -19,11 +19,101 @@ pub struct Tab {
     /// The session `I` opened this tab to resume, until its first hook
     /// records it as `claude_session`.
     pub(super) resuming: Option<String>,
+    /// What a shell tab shows in place of its name while a command runs.
+    /// Memory only: never saved, never reported over MCP.
+    pub(super) cmd: CmdLabel,
+}
+
+/// How long a shell tab's command state must hold before its label changes.
+pub(super) const CMD_SETTLE: Duration = Duration::from_secs(1);
+
+/// A shell tab's command state: at its prompt, or a process group and the
+/// short name of its leader.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(super) enum CmdState {
+    #[default]
+    Idle,
+    Job(i32, String),
+}
+
+/// Names a shell tab's own process can have while it sits at a prompt. Any
+/// other name means it exec'd into a program (`exec vim`). A list, not the
+/// first name seen, so a wrapper or rc file that execs a shell stays idle
+/// (iTerm2's "Jobs to Ignore" works the same way).
+const SHELLS: &[&str] =
+    &["sh", "bash", "zsh", "fish", "dash", "ksh", "mksh", "ash", "tcsh", "csh", "nu", "elvish", "xonsh", "pwsh"];
+
+/// The name is a shell: a known one, or the configured `shell_command`'s.
+/// A login shell's leading `-` doesn't count.
+pub(super) fn is_shell(name: &str, configured: Option<&str>) -> bool {
+    let name = name.strip_prefix('-').unwrap_or(name);
+    SHELLS.contains(&name) || configured == Some(name)
+}
+
+/// One reading of a shell tab. `own` is the tab's process and its name, `fg`
+/// the terminal's foreground group when it isn't the tab's own, with its
+/// leader's name. Names are None when they can't be read. A foreground job
+/// with no readable name falls back to the own process, so an exec'd program
+/// still shows.
+pub(super) fn reading(own: (i32, Option<String>), fg: Option<(i32, Option<String>)>, shell: Option<&str>) -> CmdState {
+    if let Some((pg, Some(name))) = fg {
+        return CmdState::Job(pg, name);
+    }
+    match own {
+        (pid, Some(name)) if !is_shell(&name, shell) => CmdState::Job(pid, name),
+        _ => CmdState::Idle,
+    }
+}
+
+/// The command a shell tab shows, settled for `CMD_SETTLE` so a run of
+/// short commands doesn't flicker through the tab bar.
+#[derive(Debug, Default)]
+pub struct CmdLabel {
+    /// The basename of the configured shell, which counts as a shell even
+    /// when it isn't in `SHELLS`.
+    pub(super) shell: Option<String>,
+    pending: CmdState,
+    since: Option<Instant>,
+    shown: CmdState,
+}
+
+impl CmdLabel {
+    /// A label for a shell tab started with `argv0`.
+    pub(super) fn for_shell(argv0: &str) -> CmdLabel {
+        let base = Path::new(argv0).file_name().map(|n| n.to_string_lossy().into_owned());
+        CmdLabel { shell: base, ..CmdLabel::default() }
+    }
+
+    /// Take one reading (see `reading`).
+    pub(super) fn observe(&mut self, own: (i32, Option<String>), fg: Option<(i32, Option<String>)>, now: Instant) {
+        let state = reading(own, fg, self.shell.as_deref());
+        if state != self.pending || self.since.is_none() {
+            self.pending = state;
+            self.since = Some(now);
+        }
+        if self.since.is_some_and(|s| now.saturating_duration_since(s) >= CMD_SETTLE) {
+            self.shown = self.pending.clone();
+        }
+    }
+
+    /// Back to idle, with the next state to wait its full delay.
+    pub(super) fn reset(&mut self, now: Instant) {
+        self.pending = CmdState::Idle;
+        self.shown = CmdState::Idle;
+        self.since = Some(now);
+    }
+
+    pub(super) fn label(&self) -> Option<&str> {
+        match &self.shown {
+            CmdState::Job(_, name) => Some(name),
+            CmdState::Idle => None,
+        }
+    }
 }
 
 impl Tab {
     pub(super) fn new(st: TabState) -> Tab {
-        Tab { st, pane: None, status: ClaudeStatus::Exited, status_ts: 0, seen_ts: 0, esc_ts: None, exit_check: None, first_args: vec![], resuming: None }
+        Tab { st, pane: None, status: ClaudeStatus::Exited, status_ts: 0, seen_ts: 0, esc_ts: None, exit_check: None, first_args: vec![], resuming: None, cmd: CmdLabel::default() }
     }
 
     /// The tab runs or holds this Claude session, or is starting it.
@@ -39,6 +129,30 @@ impl Tab {
         } else {
             self.status
         }
+    }
+
+    /// The name the tab bar shows: a running shell tab with no custom name
+    /// shows its command. Everything else (prompts, MCP, state) uses `st.name`.
+    pub fn shown_name(&self) -> &str {
+        if self.st.kind == TabKind::Shell && !self.st.custom_name && self.running() {
+            if let Some(cmd) = self.cmd.label() {
+                return cmd;
+            }
+        }
+        &self.st.name
+    }
+
+    /// Read a shell tab's foreground command into its label. A custom name
+    /// hides commands, so nothing is tracked while one is set.
+    pub(super) fn observe_command(&mut self, now: Instant) {
+        if self.st.custom_name {
+            self.cmd.reset(now);
+            return;
+        }
+        let Some(p) = self.pane.as_ref() else { return };
+        let Some(own) = p.child_pid() else { return };
+        let fg = p.foreground_pid().map(|pg| (pg, term::process_name(pg)));
+        self.cmd.observe((own, term::process_name(own)), fg, now);
     }
 
     pub fn running(&self) -> bool {
@@ -106,9 +220,17 @@ impl Tab {
                 ClaudeStatus::Attention => Some("Claude: waiting for you".into()),
                 _ => None,
             },
+            // The same reading as the label, unsettled, so an exec'd program
+            // asks too. A job whose name can't be read still counts.
             TabKind::Shell => {
-                let pid = self.pane.as_ref()?.foreground_pid()?;
-                Some(format!("shell: {}", term::process_name(pid).unwrap_or_else(|| "running command".into())))
+                let p = self.pane.as_ref()?;
+                let own = p.child_pid()?;
+                let fg = p.foreground_pid();
+                let fg_read = fg.map(|pg| (pg, term::process_name(pg)));
+                match reading((own, term::process_name(own)), fg_read, self.cmd.shell.as_deref()) {
+                    CmdState::Job(_, name) => Some(format!("shell: {name}")),
+                    CmdState::Idle => fg.map(|_| "shell: running command".into()),
+                }
             }
             TabKind::Notes => Some("note editor".into()),
         }

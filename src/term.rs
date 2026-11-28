@@ -535,9 +535,9 @@ impl Pane {
         let _ = self.child.kill();
     }
 
-    #[cfg(test)]
-    pub fn pid(&self) -> Option<u32> {
-        self.child.process_id()
+    /// The tab's own process, which is also its process group's id.
+    pub fn child_pid(&self) -> Option<i32> {
+        self.child.process_id().and_then(|p| i32::try_from(p).ok())
     }
 
     /// The process group in the terminal's foreground, unless it's the child's
@@ -557,10 +557,17 @@ impl Pane {
 pub fn process_name(pid: i32) -> Option<String> {
     #[cfg(target_os = "macos")]
     let name = {
-        let mut buf = [0u8; 256];
-        // SAFETY: proc_name writes at most `buf.len()` bytes and returns how many.
-        let n = unsafe { libc::proc_name(pid, buf.as_mut_ptr().cast(), buf.len() as u32) };
-        (n > 0).then(|| String::from_utf8_lossy(&buf[..n as usize]).into_owned())
+        // PROC_PIDT_SHORTBSDINFO, as tmux's osdep-darwin.c reads it: unlike
+        // proc_name (PROC_PIDTBSDINFO) it describes other users' processes too,
+        // so `sudo vim` shows `sudo` rather than nothing.
+        // SAFETY: proc_bsdshortinfo is plain data; proc_pidinfo writes at most `size` bytes.
+        let mut info: libc::proc_bsdshortinfo = unsafe { std::mem::zeroed() };
+        let size = std::mem::size_of_val(&info) as i32;
+        let n = unsafe { libc::proc_pidinfo(pid, libc::PROC_PIDT_SHORTBSDINFO, 0, (&raw mut info).cast(), size) };
+        (n == size).then(|| {
+            let comm: Vec<u8> = info.pbsi_comm.iter().map(|&c| c as u8).take_while(|&c| c != 0).collect();
+            String::from_utf8_lossy(&comm).into_owned()
+        })
     };
     #[cfg(target_os = "linux")]
     let name = std::fs::read_to_string(format!("/proc/{pid}/comm")).ok();
@@ -717,6 +724,28 @@ mod tests {
         pane.write(b"\x03");
         wait_until(|| pane.foreground_pid().is_none());
         pane.write(b"kill %1\r");
+    }
+
+    #[test]
+    fn exec_renames_the_tabs_own_process() {
+        let argv = ["sh".to_string(), "-i".to_string()];
+        let env = [("PS1".to_string(), "prompt> ".to_string()), ("ENV".to_string(), "/dev/null".to_string())];
+        let mut pane = Pane::spawn(&argv, &std::env::temp_dir(), &env, 10, 60).unwrap();
+        wait_until(|| pane.parser.lock().unwrap().screen().contents().contains("prompt>"));
+        let own = pane.child_pid().unwrap();
+        // `sh` is bash on macOS: any readable name other than sleep's will do.
+        let base = process_name(own).expect("the tab's own name is readable");
+        assert_ne!(base, "sleep");
+        pane.write(b"exec sleep 30\r");
+        wait_until(|| process_name(own).as_deref() == Some("sleep"));
+        assert_eq!(pane.foreground_pid(), None, "an exec'd program is still the tab's own group");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_root_process_name_is_readable() {
+        // launchd runs as root; proc_name can't describe it, SHORTBSDINFO can.
+        assert_eq!(process_name(1).as_deref(), Some("launchd"));
     }
 
     #[test]
