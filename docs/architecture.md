@@ -81,6 +81,22 @@ every source's issues. Now they are only a catalog. A folder syncs only the sour
   Without a terminal (`--attach`, scripts) nothing is asked, and the server flashes how to add a
   source. A global `sync_everywhere` switch was rejected: it would have kept the old leak for
   every existing config.
+- **The first start writes `vault` into the folder config, even the default.** The folder keeps
+  the vault it started with, and a later change to your global `vault` doesn't move it. That is
+  on purpose: moving a folder's notes is something you choose per folder.
+- **The first start can create your own config, so the client tells the server.** The prompt
+  loads (and so writes) your config before the server starts, so the server would no longer see
+  it as new. The client passes a hidden `salash server --first-run` instead, and the server
+  shows its "Created …" note rather than the no-sources hint.
+- **`salash sources add` writes only after every argument resolves.** It looks each up in the
+  catalog, refuses an unknown Jira site, and asks once per GitHub repo your config lacks, all
+  before it touches your config or the folder's. A no (or ctrl-d) leaves both files as they
+  were. A repo it adds to your config is appended as text, so your comments stay, and only
+  when your `github` is a list of `[[github]]` tables (a `github = [...]` would become a
+  duplicate key).
+- **`salash sources` acts on the nearest folder above with a `.salash`**, like `sync` and
+  `list`, while plain `salash` starts in the current directory. So in a subfolder it changes
+  the parent's picks. `add` and `remove` say which folder they change first.
 - `salash token status` and `token set`'s "not a source" note look at the catalog, because a
   token matters wherever any folder picks the source.
 
