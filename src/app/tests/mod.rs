@@ -163,8 +163,14 @@ pub(super) fn live(kind: TabKind, dir: &Path) -> Tab {
     t
 }
 
+/// Sends `c` straight to the sidebar, whatever has focus.
 pub(super) fn key(app: &mut App, c: char) {
     app.on_sidebar_key(KeyEvent::from(KeyCode::Char(c)));
+}
+
+/// Sends `c` through `App::handle`, so it goes wherever focus is.
+pub(super) fn answer(app: &mut App, c: char) {
+    app.handle(Event::Key(KeyEvent::from(KeyCode::Char(c))));
 }
 
 pub(super) fn note_of(app: &App, id: &str) -> Note {

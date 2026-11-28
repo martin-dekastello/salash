@@ -145,9 +145,10 @@ impl App {
                     self.set_view(s);
                     self.focus = Focus::Sidebar;
                 } else if let Some((_, id)) = self.item_hits.iter().find(|(r, _)| r.contains(pos)).cloned() {
-                    // Unlike ⏎, a click never starts, restarts or resumes a tab.
+                    // A click only selects and focuses the sidebar, so its keys act
+                    // on the issue. Unlike ⏎, it never starts, restarts or resumes a tab.
                     self.select_id(id);
-                    self.focus_tab_if_live();
+                    self.focus = Focus::Sidebar;
                 } else if self.frame_rect.contains(pos) {
                     if self.can_focus_terminal() {
                         self.focus = Focus::Terminal;
