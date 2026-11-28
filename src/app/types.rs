@@ -19,11 +19,80 @@ pub struct Tab {
     /// The session `I` opened this tab to resume, until its first hook
     /// records it as `claude_session`.
     pub(super) resuming: Option<String>,
+    /// What a shell tab shows in place of its name while a command runs.
+    /// Memory only: never saved, never reported over MCP.
+    pub(super) cmd: CmdLabel,
+}
+
+/// How long a shell tab's command state must hold before its label changes.
+pub(super) const CMD_SETTLE: Duration = Duration::from_secs(1);
+
+/// A shell tab's command state: at its prompt, or a process group and the
+/// short name of its leader.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(super) enum CmdState {
+    #[default]
+    Idle,
+    Job(i32, String),
+}
+
+/// The command a shell tab shows, settled for `CMD_SETTLE` so a run of
+/// short commands doesn't flicker through the tab bar.
+#[derive(Debug, Default)]
+pub struct CmdLabel {
+    /// The tab's own process's first readable name; a different name later
+    /// means it exec'd into something else.
+    pub(super) own_name: Option<String>,
+    pending: CmdState,
+    since: Option<Instant>,
+    shown: CmdState,
+}
+
+impl CmdLabel {
+    /// Take one reading. `own` is the tab's process and its name, `fg` the
+    /// terminal's foreground group when it isn't the tab's own, with its
+    /// leader's name. Names are None when they can't be read.
+    pub(super) fn observe(&mut self, own: (i32, Option<String>), fg: Option<(i32, Option<String>)>, now: Instant) {
+        let (own_pid, own_name) = own;
+        if self.own_name.is_none() {
+            self.own_name.clone_from(&own_name);
+        }
+        let state = match fg {
+            Some((pg, Some(name))) => CmdState::Job(pg, name),
+            Some((_, None)) => CmdState::Idle,
+            None => match (&self.own_name, own_name) {
+                (Some(base), Some(name)) if *base != name => CmdState::Job(own_pid, name),
+                _ => CmdState::Idle,
+            },
+        };
+        if state != self.pending || self.since.is_none() {
+            self.pending = state;
+            self.since = Some(now);
+        }
+        if self.since.is_some_and(|s| now.saturating_duration_since(s) >= CMD_SETTLE) {
+            self.shown = self.pending.clone();
+        }
+    }
+
+    /// Back to idle, with the next state to wait its full delay. The exec
+    /// baseline stays: it belongs to the process, not the label.
+    pub(super) fn reset(&mut self, now: Instant) {
+        self.pending = CmdState::Idle;
+        self.shown = CmdState::Idle;
+        self.since = Some(now);
+    }
+
+    pub(super) fn label(&self) -> Option<&str> {
+        match &self.shown {
+            CmdState::Job(_, name) => Some(name),
+            CmdState::Idle => None,
+        }
+    }
 }
 
 impl Tab {
     pub(super) fn new(st: TabState) -> Tab {
-        Tab { st, pane: None, status: ClaudeStatus::Exited, status_ts: 0, seen_ts: 0, esc_ts: None, exit_check: None, first_args: vec![], resuming: None }
+        Tab { st, pane: None, status: ClaudeStatus::Exited, status_ts: 0, seen_ts: 0, esc_ts: None, exit_check: None, first_args: vec![], resuming: None, cmd: CmdLabel::default() }
     }
 
     /// The tab runs or holds this Claude session, or is starting it.
@@ -39,6 +108,17 @@ impl Tab {
         } else {
             self.status
         }
+    }
+
+    /// The name the tab bar shows: a running shell tab with no custom name
+    /// shows its command. Everything else (prompts, MCP, state) uses `st.name`.
+    pub fn shown_name(&self) -> &str {
+        if self.st.kind == TabKind::Shell && !self.st.custom_name && self.running() {
+            if let Some(cmd) = self.cmd.label() {
+                return cmd;
+            }
+        }
+        &self.st.name
     }
 
     pub fn running(&self) -> bool {

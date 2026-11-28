@@ -535,6 +535,11 @@ impl Pane {
         let _ = self.child.kill();
     }
 
+    /// The tab's own process, which is also its process group's id.
+    pub fn child_pid(&self) -> Option<i32> {
+        self.child.process_id().map(|p| p as i32)
+    }
+
     #[cfg(test)]
     pub fn pid(&self) -> Option<u32> {
         self.child.process_id()
