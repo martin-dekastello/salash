@@ -352,12 +352,22 @@ impl Provider for Jira {
     }
 }
 
+/// The sources this folder syncs.
 pub fn from_config(cfg: &Config) -> Vec<Box<dyn Provider>> {
+    from_sources(&cfg.github, &cfg.jira)
+}
+
+/// Every source your own config lists, synced here or not.
+pub fn from_catalog(cfg: &Config) -> Vec<Box<dyn Provider>> {
+    from_sources(&cfg.catalog_github, &cfg.catalog_jira)
+}
+
+fn from_sources(github: &[GithubSource], jira: &[JiraSource]) -> Vec<Box<dyn Provider>> {
     let mut v: Vec<Box<dyn Provider>> = Vec::new();
-    for g in &cfg.github {
+    for g in github {
         v.push(Box::new(Github(g.clone())));
     }
-    for j in &cfg.jira {
+    for j in jira {
         v.push(Box::new(Jira(j.clone())));
     }
     v
