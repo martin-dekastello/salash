@@ -33,18 +33,32 @@ Rules a reader couldn't guess from the code, all in `CmdLabel` (`src/app/types.r
   `vim` never flashes `ls`, and a script of short commands keeps the last label that lasted.
   tmux's `automatic-rename` re-reads the name on a 500ms timer and doesn't settle. We do,
   because the tab bar's width moves with the label.
-- **`exec` detection.** `foreground_pid` treats the tab's own process group as idle. So
-  `exec vim` or `exec bash` would look like a shell at its prompt. To catch that, the own
-  process's name is recorded the first time it can be read, as a baseline. A different name
-  later is its own state, (own pgid, new name), and goes through the same 1s settle. `exec zsh`
-  in zsh keeps the name and stays idle. If the baseline is never readable, there's no exec
-  detection. The baseline belongs to the process, so it's kept when the label resets.
-- **An unreadable name counts as idle.** This covers, for example, a root process macOS won't
-  describe, or an OS that isn't supported. Without it the tab would show an empty label.
+- **`exec` detection by a list of shells.** `foreground_pid` treats the tab's own process group
+  as idle, so `exec vim` would look like a shell at its prompt. To catch that, the own process's
+  name is checked against a list of shells (`SHELLS`: sh, bash, zsh, fish, …, plus the basename
+  of `shell_command[0]`; a login shell's leading `-` is dropped). Any other name is its own
+  state, (own pgid, name), and goes through the same 1s settle, so `exec vim` shows `vim`. This
+  works like iTerm2's "Jobs to Ignore". The first version used the first name it read as the
+  baseline instead, and the PR #49 review found that a wrapper (`sh -c 'cd x && exec zsh'`) or a
+  `.bashrc` ending in `exec fish` then showed `zsh`/`fish` for the whole session
+  ([#47](https://github.com/martin-dekastello/salash/issues/47)). The cost of the list is that an
+  `exec bash` typed in zsh stays `shell`, and `shell_command = ["vim"]` shows `shell` while vim
+  runs, because vim is the tab's shell.
+- **An unreadable name falls back.** If the foreground job's name can't be read, the own process
+  is checked as above, so an exec'd `vim` still shows. If that can't be read either, as on an OS
+  that isn't supported, the tab is idle. Without this the tab would show an empty label. On
+  macOS the name is read with `PROC_PIDT_SHORTBSDINFO`, as tmux does. `proc_name` uses
+  `PROC_PIDTBSDINFO`, which refuses other users' processes, so with it `sudo vim` would show
+  `shell`.
+- **The Done confirm agrees with the label.** Moving an issue to Done stops its idle tabs without
+  asking, and lists the busy ones first. A shell tab counts as busy whenever its label would show
+  a command, including an exec'd program. The check uses the same reading without the settle,
+  and also counts a job whose name can't be read.
 - **Custom names win.** A shell tab with a custom name never shows commands, and the label is
   held reset (nothing tracked) while the name is set.
-- **Clearing a rename** (an empty `,`) sets a shell tab's name back to `shell` and a note tab's
-  to `notes`, since neither has a title to take over. It also restarts the 1s tracking from
-  idle: with `vim` running, the tab shows `shell` for 1s, then `vim`. A Claude tab keeps its
-  name, and its next OSC title renames it, as before.
+- **Clearing a rename** (an empty `,`, or `,` confirmed unchanged on the default `shell` or
+  `notes`) sets a shell tab's name back to `shell` and a note tab's to `notes`, since neither
+  has a title to take over. It also restarts the 1s tracking from idle: with `vim` running, the
+  tab shows `shell` for 1s, then `vim`. A Claude tab keeps its name, and its next OSC title
+  renames it, as before.
 - **Exited shells** show their stored name with `✕`, never the last command.
