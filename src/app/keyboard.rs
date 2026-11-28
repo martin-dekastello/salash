@@ -191,7 +191,7 @@ impl App {
             KeyCode::Char('T') => self.move_stage(Stage::Todo),
             KeyCode::Char('S') | KeyCode::Char('r') => {
                 if providers::from_config(&self.cfg).is_empty() {
-                    self.flash("No [[github]] or [[jira]] sources in config".into());
+                    self.flash(self.cfg.no_sources_hint());
                 } else {
                     self.start_sync();
                     self.flash("Syncing…".into());

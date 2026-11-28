@@ -173,9 +173,11 @@ pub fn run(inst: Instance) -> Result<()> {
     }
     if !app.cfg.ignored.is_empty() {
         app.flash(format!(
-            "Ignored in .salash/config.toml: {} (only your own config may set these)",
+            "Ignored in .salash/config.toml: {} (only your own config may set or list these)",
             app.cfg.ignored.join(", ")
         ));
+    } else if !first_run && crate::providers::from_config(&app.cfg).is_empty() {
+        app.flash(app.cfg.no_sources_hint());
     }
     let rx = listen(&inst)?;
     let stop = stop_on_signal();
