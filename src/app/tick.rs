@@ -68,6 +68,9 @@ impl App {
                     (p.exited.is_some(), p.poll_exit(), p.title(), p.take_bell())
                 };
                 let claude = t.st.kind == TabKind::Claude;
+                if t.st.kind == TabKind::Shell && !exited {
+                    t.observe_command(Instant::now());
+                }
                 if claude && !was_exited {
                     if let Some(sid) = t.sync_status() {
                         new_sessions.push((issue.clone(), sid, t.st.name.clone()));

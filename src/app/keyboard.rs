@@ -285,7 +285,7 @@ impl App {
         }
     }
 
-    fn rename_tab(&mut self, name: String) {
+    pub(super) fn rename_tab(&mut self, name: String) {
         let Some(id) = self.selected.clone() else { return };
         let name = name.trim().to_string();
         let rt = self.rt_for(&id);
@@ -293,6 +293,11 @@ impl App {
             t.st.custom_name = !name.is_empty();
             if !name.is_empty() {
                 t.st.name = name;
+            } else if t.st.kind != TabKind::Claude {
+                // A Claude tab keeps its name until its title renames it; a
+                // shell or note tab has no title, so it goes back to its default.
+                t.st.name = super::spawn::default_name(t.st.kind).into();
+                t.cmd.reset(Instant::now());
             }
         }
         self.persist(&id);

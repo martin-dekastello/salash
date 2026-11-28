@@ -121,6 +121,19 @@ impl Tab {
         &self.st.name
     }
 
+    /// Read a shell tab's foreground command into its label. A custom name
+    /// hides commands, so nothing is tracked while one is set.
+    pub(super) fn observe_command(&mut self, now: Instant) {
+        if self.st.custom_name {
+            self.cmd.reset(now);
+            return;
+        }
+        let Some(p) = self.pane.as_ref() else { return };
+        let Some(own) = p.child_pid() else { return };
+        let fg = p.foreground_pid().map(|pg| (pg, term::process_name(pg)));
+        self.cmd.observe((own, term::process_name(own)), fg, now);
+    }
+
     pub fn running(&self) -> bool {
         self.pane.as_ref().is_some_and(|p| p.exited.is_none())
     }
